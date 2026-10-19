@@ -1,9 +1,78 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { EVENT_CODE } from './config';
+import ScoreInput from './ScoreInput';
 
 const PENDING = 'test26_pending_code';
 const lsKey = (id) => `test26_${id}`;
+
+// Unscored categories count as 0 toward the running total — this is a live,
+// provisional view while judging is in progress, not a final placement.
+function entryStats(entryId, categories, scores) {
+  let total = 0;
+  let scoredCount = 0;
+  for (const c of categories) {
+    const cell = scores[`${entryId}|${c.id}`];
+    if (cell && cell.value != null) { total += cell.value; scoredCount++; }
+  }
+  return { total, scoredCount, avg: categories.length ? total / categories.length : 0 };
+}
+
+function sortedEntries(entries, categories, scores, sortOrder) {
+  if (sortOrder === 'rank') {
+    return [...entries].sort((a, b) => entryStats(b.id, categories, scores).total - entryStats(a.id, categories, scores).total);
+  }
+  return [...entries].sort((a, b) => a.entry_number - b.entry_number);
+}
+
+// Splits on the first sentence-ending punctuation so the modal can show a
+// short teaser with the rest tucked behind a "more" toggle.
+function splitFirstSentence(text) {
+  if (!text) return [null, null];
+  const match = text.match(/^(.*?[.?!])(?:\s+(.*))?$/s);
+  if (!match) return [text, null];
+  return [match[1], match[2] || null];
+}
+
+function CategoryDescription({ text }) {
+  const [expanded, setExpanded] = useState(false);
+  const [first, rest] = splitFirstSentence(text);
+  if (!first) return null;
+  return (
+    <div className="cat-desc">
+      <span>{first}</span>
+      {rest && (
+        <>
+          {' '}
+          <button type="button" className="cat-desc-toggle" onClick={() => setExpanded((v) => !v)}>
+            {expanded ? 'less' : 'more'}
+          </button>
+          {expanded && <div className="cat-desc-rest">{rest}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+function timeAgo(date) {
+  if (!date) return '';
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 1) return '1 min ago';
+  return `${minutes} min ago`;
+}
+
+function saveStatusLabel(status, lastSavedAt) {
+  switch (status) {
+    case 'saving': return 'Saving…';
+    case 'retrying': return 'Save failed — retrying…';
+    case 'error': return 'Save failed — reopen this entry to try again';
+    case 'saved': return `Saved ${timeAgo(lastSavedAt)}`;
+    default: return '';
+  }
+}
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -22,6 +91,10 @@ export default function App() {
   const [entries, setEntries] = useState([]);
   const [scores, setScores] = useState({});
   const [notes, setNotes] = useState({});
+  const [openEntry, setOpenEntry] = useState(null);
+  const [sortOrder, setSortOrder] = useState('rank');
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [lastSavedAt, setLastSavedAt] = useState(null);
 
   const ejRef = useRef(null);
   const scoresRef = useRef({});
@@ -29,6 +102,8 @@ export default function App() {
   const dirty = useRef(new Set());
   const timers = useRef({});
   const retries = useRef({});
+  const inFlight = useRef(0);
+  const hardFailed = useRef(new Set());
 
   useEffect(() => { scoresRef.current = scores; }, [scores]);
   useEffect(() => { notesRef.current = notes; }, [notes]);
@@ -52,6 +127,14 @@ export default function App() {
     const onVis = () => { if (document.visibilityState === 'visible') dirty.current.forEach((k) => flush(k)); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
+
+  // Tick every 15s so "Saved X ago" stays fresh without a real state change
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setLastSavedAt((prev) => (prev ? new Date(prev.getTime()) : prev));
+    }, 15000);
+    return () => clearInterval(iv);
   }, []);
 
   async function bootstrap(s) {
@@ -154,6 +237,9 @@ export default function App() {
     if (!ejRef.current) return;
     const ejId = ejRef.current.id;
     dirty.current.delete(key);
+    inFlight.current += 1;
+    setSaveStatus('saving');
+    let ok = true;
     try {
       if (key.startsWith('s:')) {
         const [eid, cid] = key.slice(2).split('|');
@@ -168,10 +254,30 @@ export default function App() {
         if (e) throw e;
       }
       retries.current[key] = 0;
+      hardFailed.current.delete(key);
     } catch (e) {
+      ok = false;
       const n = (retries.current[key] || 0) + 1;
       retries.current[key] = n;
-      if (n <= 5) { dirty.current.add(key); setTimeout(() => flush(key), Math.min(1000 * Math.pow(2, n), 15000)); }
+      if (n <= 5) {
+        dirty.current.add(key);
+        setTimeout(() => flush(key), Math.min(1000 * Math.pow(2, n), 15000));
+      } else {
+        // Retries exhausted — stop hammering Supabase, but keep this flagged
+        // so the status indicator doesn't quietly report "saved" for a write
+        // that never actually landed.
+        hardFailed.current.add(key);
+      }
+    } finally {
+      inFlight.current -= 1;
+    }
+    if (hardFailed.current.size > 0) {
+      setSaveStatus('error');
+    } else if (!ok) {
+      setSaveStatus('retrying');
+    } else if (inFlight.current === 0 && dirty.current.size === 0) {
+      setSaveStatus('saved');
+      setLastSavedAt(new Date());
     }
   }
 
@@ -273,34 +379,55 @@ export default function App() {
       {step === 'scoring' && (<>
         <div className="eyebrow">TEST26 · Test Track</div>
         <h1>Score the entries</h1>
-        <p className="sub">Blind — entry numbers only. Scores save as you go.</p>
-        {entries.map((en) => (
-          <div className="card" key={en.id}>
-            <div className="entry-num">ENTRY #{en.entry_number}</div>
-            {categories.map((c) => {
-              const key = `${en.id}|${c.id}`;
-              const cell = scores[key];
-              const touched = cell && cell.value != null;
-              const val = touched ? cell.value : 5;
-              return (
-                <div className="cat" key={c.id}>
-                  <div className="cat-head">
-                    <span className="cat-name">{c.name}</span>
-                    <span className={'cat-val' + (touched ? '' : ' untouched')}>{touched ? val : '—'}<span style={{ color: 'var(--faint)', fontSize: '12px' }}>/{c.max_points}</span></span>
-                  </div>
-                  <input type="range" min="0" max={c.max_points} step="1" value={val} onChange={(e) => setValue(en.id, c.id, Number(e.target.value))} />
-                  <div className="note-label">Note (optional)</div>
-                  <textarea value={(cell && cell.note) || ''} onChange={(e) => setScoreNote(en.id, c.id, e.target.value)} />
-                </div>
-              );
-            })}
-            <div className="note-label" style={{ marginTop: '16px' }}>Overall note for this entry</div>
-            <textarea value={notes[en.id] || ''} onChange={(e) => setEntryNote(en.id, e.target.value)} />
+        <p className="sub">Blind — entry numbers only. Tap an entry to score it.</p>
+        {saveStatus !== 'idle' && (
+          <div className={'save-status' + ((saveStatus === 'error' || saveStatus === 'retrying') ? ' save-status-error' : '')}>
+            {saveStatusLabel(saveStatus, lastSavedAt)}
           </div>
-        ))}
+        )}
+
+        <div className="sort-toggle">
+          <button className={'sort-opt' + (sortOrder === 'rank' ? ' active' : '')} onClick={() => setSortOrder('rank')}>Ranking</button>
+          <button className={'sort-opt' + (sortOrder === 'sequential' ? ' active' : '')} onClick={() => setSortOrder('sequential')}>Entry #</button>
+        </div>
+
+        <ul className="entry-list">
+          {sortedEntries(entries, categories, scores, sortOrder).map((en, idx) => {
+            const { avg, scoredCount } = entryStats(en.id, categories, scores);
+            const avgMax = categories.length ? categories.reduce((s, c) => s + (c.max_points || 0), 0) / categories.length : 0;
+            return (
+              <li className="entry-row" key={en.id} onClick={() => setOpenEntry(en.id)}>
+                {sortOrder === 'rank' && <span className="entry-row-pos">{idx + 1}</span>}
+                <span className="entry-row-num">Entry #{en.entry_number}</span>
+                <span className="entry-row-progress">{scoredCount}/{categories.length}</span>
+                <span className="entry-row-avg">{scoredCount ? avg.toFixed(1) + '/' + avgMax : '—'}</span>
+              </li>
+            );
+          })}
+        </ul>
+
         <button className="btn primary" onClick={submitAll} disabled={busy}>{busy ? 'Submitting…' : 'Submit my scores'}</button>
         {error && <div className="err">{error}</div>}
         <p className="muted-note" style={{ marginTop: '12px' }}>You can return and change scores until you submit.</p>
+
+        {openEntry != null && (
+          <EntryModal
+            entry={entries.find((e) => e.id === openEntry)}
+            categories={categories}
+            scores={scores}
+            note={notes[openEntry] || ''}
+            disabled={busy}
+            saveStatus={saveStatus}
+            lastSavedAt={lastSavedAt}
+            onCommitScore={(cid, v) => setValue(openEntry, cid, v)}
+            onCommitCategoryNote={(cid, n) => setScoreNote(openEntry, cid, n)}
+            onCommitEntryNote={(n) => setEntryNote(openEntry, n)}
+            onClose={() => {
+              Array.from(dirty.current).forEach((k) => flush(k));
+              setOpenEntry(null);
+            }}
+          />
+        )}
       </>)}
 
       {step === 'submitted' && (
@@ -310,6 +437,52 @@ export default function App() {
           <p className="muted-note">Thanks, {nameInput || 'judge'}. Your scores are locked in for TEST26.</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function EntryModal({ entry, categories, scores, note, disabled, saveStatus, lastSavedAt, onCommitScore, onCommitCategoryNote, onCommitEntryNote, onClose }) {
+  if (!entry) return null;
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Entry #{entry.entry_number}</h2>
+          <div className="modal-header-right">
+            {saveStatus !== 'idle' && (
+              <span className={'save-status' + ((saveStatus === 'error' || saveStatus === 'retrying') ? ' save-status-error' : '')}>
+                {saveStatusLabel(saveStatus, lastSavedAt)}
+              </span>
+            )}
+            <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
+          </div>
+        </div>
+        <div className="modal-body">
+          {categories.map((c) => {
+            const key = `${entry.id}|${c.id}`;
+            const cell = scores[key];
+            const min = c.min_points ?? 0;
+            const max = c.max_points ?? 10;
+            return (
+              <div className="cat" key={c.id}>
+                <ScoreInput
+                  categoryName={c.name}
+                  value={cell && cell.value != null ? cell.value : null}
+                  min={min}
+                  max={max}
+                  onCommit={(v) => onCommitScore(c.id, v)}
+                  disabled={disabled}
+                />
+                <CategoryDescription text={c.description} />
+                <div className="note-label">Notes (optional)</div>
+                <textarea value={(cell && cell.note) || ''} onChange={(e) => onCommitCategoryNote(c.id, e.target.value)} />
+              </div>
+            );
+          })}
+          <div className="note-label" style={{ marginTop: '16px' }}>Overall note for this entry</div>
+          <textarea value={note} onChange={(e) => onCommitEntryNote(e.target.value)} />
+        </div>
+      </div>
     </div>
   );
 }
