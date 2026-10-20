@@ -3,8 +3,17 @@ import { supabase } from './supabaseClient';
 import { EVENT_CODE } from './config';
 import ScoreInput from './ScoreInput';
 
-const PENDING = 'test26_pending_code';
-const lsKey = (id) => `test26_${id}`;
+// Persists across page loads (including the OAuth-redirect round trip) and
+// across sessions on the same device — it's "the event this device is
+// currently pointed at," not a one-shot flag. Overwritten whenever a judge
+// types a different code. Old builds kept this fixed to one event; renamed
+// away from the old 'test26_pending_code' key for that reason.
+const CURRENT_CODE_KEY = 'judge_current_event_code';
+// Pre-dynamic-event-code builds keyed local score caches only by enrollment
+// id (fine when there's exactly one event per deployment). Keep the old
+// key format around so loadScoring can migrate it forward without loss.
+const legacyLsKey = (enrollmentId) => `test26_${enrollmentId}`;
+const lsKey = (eventId, enrollmentId) => `scores_${eventId}_${enrollmentId}`;
 
 // Unscored categories count as 0 toward the running total — this is a live,
 // provisional view while judging is in progress, not a final placement.
@@ -82,11 +91,12 @@ export default function App() {
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const [codeInput, setCodeInput] = useState('');
+  const [codeInput, setCodeInput] = useState(EVENT_CODE);
   const [email, setEmail] = useState('');
   const [nameInput, setNameInput] = useState('');
 
   const [eventRow, setEventRow] = useState(null);
+  const [trackRow, setTrackRow] = useState(null);
   const [categories, setCategories] = useState([]);
   const [entries, setEntries] = useState([]);
   const [scores, setScores] = useState({});
@@ -139,21 +149,29 @@ export default function App() {
 
   async function bootstrap(s) {
     setError('');
-    const { data: ev } = await supabase.from('events').select('*').ilike('event_code', EVENT_CODE).maybeSingle();
-    if (!ev) { setError('Event not found. Refresh and try again.'); setReady(true); return; }
-    setEventRow(ev);
-    const { data: judge } = await supabase.from('judges').select('*').eq('user_id', s.user.id).maybeSingle();
-    if (!judge) {
-      setStep(localStorage.getItem(PENDING) === EVENT_CODE ? 'name' : 'code');
-      setReady(true); return;
+    // Resolving the events table requires an authenticated role (RLS), so a
+    // code typed before sign-in can't be validated yet — submitCode() just
+    // stores it and this is where it actually gets looked up, for both the
+    // immediate post-guest-signin path and the OAuth-redirect round trip
+    // (where component state, including eventRow, was lost on reload).
+    let ev = eventRow;
+    if (!ev) {
+      const code = localStorage.getItem(CURRENT_CODE_KEY);
+      if (!code) { setStep('code'); setReady(true); return; }
+      const { data: found } = await supabase.from('events').select('*').ilike('event_code', code).maybeSingle();
+      if (!found) {
+        localStorage.removeItem(CURRENT_CODE_KEY);
+        setError('Code not recognized. Check with the organizer.');
+        setStep('code'); setReady(true); return;
+      }
+      ev = found;
+      setEventRow(ev);
     }
+    const { data: judge } = await supabase.from('judges').select('*').eq('user_id', s.user.id).maybeSingle();
+    if (!judge) { setStep('name'); setReady(true); return; }
     setNameInput(judge.display_name || '');
     const { data: enrollment } = await supabase.from('event_judges').select('*').eq('event_id', ev.id).eq('judge_id', judge.id).maybeSingle();
-    if (!enrollment) {
-      if (localStorage.getItem(PENDING) === EVENT_CODE) { await enroll(ev, judge.display_name); }
-      else { setStep('code'); setReady(true); }
-      return;
-    }
+    if (!enrollment) { await enroll(ev, judge.display_name); return; }
     ejRef.current = enrollment;
     if (enrollment.submitted_at) { setStep('submitted'); setReady(true); return; }
     await loadScoring(ev, enrollment);
@@ -166,7 +184,7 @@ export default function App() {
     const { data: ejId, error: e } = await supabase.rpc('enroll_me', {
       p_display_name: displayName,
       p_event_id: ev.id,
-      p_event_code: EVENT_CODE,
+      p_event_code: ev.event_code,
     });
     if (e || !ejId) { setError('Could not join the event. Check the code and try again.'); setReady(true); return; }
     const { data: enrollment, error: se } = await supabase.from('event_judges').select('*').eq('id', ejId).single();
@@ -179,6 +197,7 @@ export default function App() {
     const { data: tracks } = await supabase.from('event_tracks').select('*').eq('event_id', ev.id).order('display_order');
     const track = tracks && tracks[0];
     if (!track) { setError('No track configured.'); setReady(true); return; }
+    setTrackRow(track);
     const [{ data: cats }, { data: ents }] = await Promise.all([
       supabase.from('categories').select('*').eq('track_id', track.id).order('display_order'),
       supabase.from('entries').select('*').eq('track_id', track.id).order('entry_number'),
@@ -193,21 +212,32 @@ export default function App() {
     (savedScores || []).forEach((r) => { sMap[`${r.entry_id}|${r.category_id}`] = { value: r.raw_score, note: r.note || '' }; });
     const nMap = {};
     (savedNotes || []).forEach((r) => { nMap[r.entry_id] = r.note || ''; });
+    // Migrate any unsynced data left under the old single-event key format
+    // forward to the event-namespaced key, then layer in whatever's already
+    // under the new key (should rarely coexist, but new wins if so).
+    const oldKey = legacyLsKey(enrollment.id);
+    const newKey = lsKey(ev.id, enrollment.id);
     try {
-      const local = JSON.parse(localStorage.getItem(lsKey(enrollment.id)) || 'null');
-      if (local && local.scores) Object.assign(sMap, local.scores);
-      if (local && local.notes) Object.assign(nMap, local.notes);
+      const old = JSON.parse(localStorage.getItem(oldKey) || 'null');
+      if (old && old.scores) Object.assign(sMap, old.scores);
+      if (old && old.notes) Object.assign(nMap, old.notes);
     } catch (_) {}
+    try {
+      const current = JSON.parse(localStorage.getItem(newKey) || 'null');
+      if (current && current.scores) Object.assign(sMap, current.scores);
+      if (current && current.notes) Object.assign(nMap, current.notes);
+    } catch (_) {}
+    localStorage.removeItem(oldKey);
     scoresRef.current = sMap; notesRef.current = nMap;
     setScores(sMap); setNotes(nMap);
-    localStorage.removeItem(PENDING);
+    mirrorNow(sMap, nMap);
     setStep('scoring'); setReady(true);
   }
 
   function mirrorNow(s, n) {
-    const id = ejRef.current && ejRef.current.id;
-    if (!id) return;
-    try { localStorage.setItem(lsKey(id), JSON.stringify({ scores: s, notes: n, t: Date.now() })); } catch (_) {}
+    const ej = ejRef.current;
+    if (!ej) return;
+    try { localStorage.setItem(lsKey(ej.event_id, ej.id), JSON.stringify({ scores: s, notes: n, t: Date.now() })); } catch (_) {}
   }
 
   function setValue(eid, cid, value) {
@@ -305,8 +335,11 @@ export default function App() {
     setError('');
     const code = codeInput.trim().toUpperCase();
     if (!code) return;
-    if (code !== EVENT_CODE) { setError('Code not recognized. Check with the organizer.'); return; }
-    localStorage.setItem(PENDING, EVENT_CODE);
+    // Can't validate against the events table yet — RLS requires an
+    // authenticated role, and this judge may not have signed in at all yet.
+    // bootstrap() does the real lookup once there's a session, and bounces
+    // back here with an error if the code turns out not to match anything.
+    localStorage.setItem(CURRENT_CODE_KEY, code);
     if (session) bootstrap(session); else setStep('signin');
   }
 
@@ -315,12 +348,11 @@ export default function App() {
     const nm = nameInput.trim();
     if (!nm) { setError('Enter a name so your scores are labeled.'); return; }
     if (!session) { setStep('signin'); return; }
+    if (!eventRow) { setError('Event not found. Refresh and try again.'); return; }
     setBusy(true);
-    const ev = eventRow || (await supabase.from('events').select('*').ilike('event_code', EVENT_CODE).maybeSingle()).data;
-    if (!ev) { setBusy(false); setError('Event not found. Refresh.'); return; }
     // enroll_me creates/updates the judge from auth.uid() + display name, so no
     // direct judges write is needed here anymore.
-    await enroll(ev, nm);
+    await enroll(eventRow, nm);
     setBusy(false);
   }
 
@@ -337,6 +369,10 @@ export default function App() {
 
   if (!ready) return (<div className="wrap"><div className="center muted-note">Loading…</div></div>);
 
+  // Before eventRow loads (signin screen reached straight off submitCode, no
+  // DB round trip yet — see bootstrap()), fall back to what the judge typed.
+  const eventLabel = (eventRow && (eventRow.name || eventRow.event_code)) || codeInput || 'Judge Scoring';
+
   return (
     <div className="wrap">
       <div className="hero"><img src="https://2026-mothership-meltdown-melt.vercel.app/mothership.jpeg" alt="" /><div className="mask" /></div>
@@ -346,13 +382,13 @@ export default function App() {
         <h1>Enter event code</h1>
         <p className="sub">Your organizer gave you a code to unlock scoring.</p>
         <label>Event code</label>
-        <input type="text" value={codeInput} onChange={(e) => setCodeInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitCode()} placeholder="TEST26" autoCapitalize="characters" />
+        <input type="text" value={codeInput} onChange={(e) => setCodeInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitCode()} placeholder="Event code" autoCapitalize="characters" />
         <button className="btn primary" onClick={submitCode}>Continue</button>
         {error && <div className="err">{error}</div>}
       </>)}
 
       {step === 'signin' && (<>
-        <div className="eyebrow">TEST26</div>
+        <div className="eyebrow">{eventLabel}</div>
         <h1>Sign in to score</h1>
         <p className="sub">This keeps your scores tied to you across devices.</p>
         <button className="btn primary" onClick={signInGoogle}>Continue with Google</button>
@@ -367,7 +403,7 @@ export default function App() {
       </>)}
 
       {step === 'name' && (<>
-        <div className="eyebrow">TEST26</div>
+        <div className="eyebrow">{eventLabel}</div>
         <h1>What should we call you?</h1>
         <p className="sub">This labels your scores. It isn't shown to other judges.</p>
         <label>Judge name</label>
@@ -377,7 +413,7 @@ export default function App() {
       </>)}
 
       {step === 'scoring' && (<>
-        <div className="eyebrow">TEST26 · Test Track</div>
+        <div className="eyebrow">{eventLabel}{trackRow && trackRow.name ? ` · ${trackRow.name}` : ''}</div>
         <h1>Score the entries</h1>
         <p className="sub">Blind — entry numbers only. Tap an entry to score it.</p>
         {saveStatus !== 'idle' && (
@@ -434,7 +470,7 @@ export default function App() {
         <div className="center">
           <div className="big-check">✓</div>
           <h1>Scores submitted</h1>
-          <p className="muted-note">Thanks, {nameInput || 'judge'}. Your scores are locked in for TEST26.</p>
+          <p className="muted-note">Thanks, {nameInput || 'judge'}. Your scores are locked in for {eventLabel}.</p>
         </div>
       )}
     </div>
