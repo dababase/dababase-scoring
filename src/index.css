@@ -7,7 +7,7 @@ body{margin:0;background:var(--bg);color:var(--body);font-family:Inter,system-ui
    when the resolved event has events.theme.background_url set. Sits behind
    everything at a fixed position so it covers the viewport regardless of
    .wrap's own width/scroll. */
-.bg-artwork{position:fixed;inset:0;z-index:-1;background-size:cover;background-position:center;background-repeat:no-repeat}
+.bg-artwork{position:fixed;inset:0;z-index:-1;background-size:55%;background-position:center;background-repeat:no-repeat}
 .bg-artwork-scrim{position:absolute;inset:0}
 
 .logo-header{display:flex;justify-content:center;margin-bottom:20px}
