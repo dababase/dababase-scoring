@@ -35,14 +35,31 @@ function shadeToward(hex, toHex, t) {
 
 // Unscored categories count as 0 toward the running total — this is a live,
 // provisional view while judging is in progress, not a final placement.
+// Only counts scores actually confirmed saved (cell.synced) — a value that's
+// only sitting in local state (still queued, retrying, or rejected by the
+// DB) isn't "scored" yet from the judge's or organizer's point of view.
 function entryStats(entryId, categories, scores) {
   let total = 0;
   let scoredCount = 0;
   for (const c of categories) {
     const cell = scores[`${entryId}|${c.id}`];
-    if (cell && cell.value != null) { total += cell.value; scoredCount++; }
+    if (cell && cell.value != null && cell.synced) { total += cell.value; scoredCount++; }
   }
   return { total, scoredCount, avg: categories.length ? total / categories.length : 0 };
+}
+
+// (entry, category) pairs with no confirmed score — surfaced before submit.
+function unscoredPairs(entries, categories, scores) {
+  const pairs = [];
+  for (const en of entries) {
+    for (const c of categories) {
+      const cell = scores[`${en.id}|${c.id}`];
+      if (!cell || cell.value == null || !cell.synced) {
+        pairs.push({ entryNumber: en.entry_number, categoryName: c.name });
+      }
+    }
+  }
+  return pairs;
 }
 
 function sortedEntries(entries, categories, scores, sortOrder) {
@@ -123,6 +140,12 @@ export default function App() {
   const [sortOrder, setSortOrder] = useState('rank');
   const [saveStatus, setSaveStatus] = useState('idle');
   const [lastSavedAt, setLastSavedAt] = useState(null);
+  // Per-category messages from a DB-rejected score (check_violation) — keyed
+  // entryId|categoryId, shown inline on that exact ScoreInput.
+  const [fieldErrors, setFieldErrors] = useState({});
+  // Set right before submit when some (entry, category) pairs aren't scored
+  // yet; submitting again with the same unresolved list proceeds anyway.
+  const [missingList, setMissingList] = useState(null);
 
   const ejRef = useRef(null);
   const scoresRef = useRef({});
@@ -254,28 +277,36 @@ export default function App() {
       supabase.from('entry_notes').select('entry_id,note').eq('event_judge_id', enrollment.id),
     ]);
     const sMap = {};
-    (savedScores || []).forEach((r) => { sMap[`${r.entry_id}|${r.category_id}`] = { value: r.raw_score, note: r.note || '' }; });
+    (savedScores || []).forEach((r) => { sMap[`${r.entry_id}|${r.category_id}`] = { value: r.raw_score, note: r.note || '', synced: true }; });
     const nMap = {};
     (savedNotes || []).forEach((r) => { nMap[r.entry_id] = r.note || ''; });
     // Migrate any unsynced data left under the old single-event key format
     // forward to the event-namespaced key, then layer in whatever's already
-    // under the new key (should rarely coexist, but new wins if so).
+    // under the new key (should rarely coexist, but new wins if so). Local
+    // overlay values aren't trusted as already-in-the-DB — queued below so
+    // they get a real flush and a confirmed `synced` flag.
     const oldKey = legacyLsKey(enrollment.id);
     const newKey = lsKey(ev.id, enrollment.id);
+    const unsyncedKeys = new Set();
     try {
       const old = JSON.parse(localStorage.getItem(oldKey) || 'null');
-      if (old && old.scores) Object.assign(sMap, old.scores);
+      if (old && old.scores) {
+        for (const [k, v] of Object.entries(old.scores)) { sMap[k] = { value: v.value, note: v.note || '', synced: false }; unsyncedKeys.add(k); }
+      }
       if (old && old.notes) Object.assign(nMap, old.notes);
     } catch (_) {}
     try {
       const current = JSON.parse(localStorage.getItem(newKey) || 'null');
-      if (current && current.scores) Object.assign(sMap, current.scores);
+      if (current && current.scores) {
+        for (const [k, v] of Object.entries(current.scores)) { sMap[k] = { value: v.value, note: v.note || '', synced: false }; unsyncedKeys.add(k); }
+      }
       if (current && current.notes) Object.assign(nMap, current.notes);
     } catch (_) {}
     localStorage.removeItem(oldKey);
     scoresRef.current = sMap; notesRef.current = nMap;
     setScores(sMap); setNotes(nMap);
     mirrorNow(sMap, nMap);
+    unsyncedKeys.forEach((k) => queue('s:' + k));
     setStep('scoring'); setReady(true);
   }
 
@@ -288,13 +319,17 @@ export default function App() {
   function setValue(eid, cid, value) {
     const key = `${eid}|${cid}`;
     const cur = scoresRef.current[key] || {};
-    const next = { ...scoresRef.current, [key]: { value, note: cur.note || '' } };
+    const next = { ...scoresRef.current, [key]: { value, note: cur.note || '', synced: false } };
     scoresRef.current = next; setScores(next); mirrorNow(next, notesRef.current); queue('s:' + key);
+    if (fieldErrors[key]) setFieldErrors((prev) => { const { [key]: _drop, ...rest } = prev; return rest; });
   }
   function setScoreNote(eid, cid, note) {
     const key = `${eid}|${cid}`;
     const cur = scoresRef.current[key] || {};
-    const next = { ...scoresRef.current, [key]: { value: cur.value != null ? cur.value : null, note } };
+    // A note-only edit doesn't invalidate an already-confirmed score — only
+    // changing the value itself does (avoids the progress count flickering
+    // "scored" -> "unscored" -> "scored" while someone's just typing a note).
+    const next = { ...scoresRef.current, [key]: { value: cur.value != null ? cur.value : null, note, synced: cur.synced || false } };
     scoresRef.current = next; setScores(next); mirrorNow(next, notesRef.current); queue('s:' + key);
   }
   function setEntryNote(eid, note) {
@@ -308,6 +343,13 @@ export default function App() {
     timers.current[key] = setTimeout(() => flush(key), 600);
   }
 
+  function markSynced(key) {
+    const cur = scoresRef.current[key];
+    if (!cur || cur.synced) return;
+    const next = { ...scoresRef.current, [key]: { ...cur, synced: true } };
+    scoresRef.current = next; setScores(next);
+  }
+
   async function flush(key) {
     if (!ejRef.current) return;
     const ejId = ejRef.current.id;
@@ -318,10 +360,23 @@ export default function App() {
     try {
       if (key.startsWith('s:')) {
         const [eid, cid] = key.slice(2).split('|');
-        const cell = scoresRef.current[`${eid}|${cid}`] || {};
-        const payload = { event_judge_id: ejId, entry_id: eid, category_id: cid, raw_score: cell.value != null ? cell.value : null, note: cell.note || null, is_self_score: false };
-        const { error: e } = await supabase.from('scores').upsert(payload, { onConflict: 'event_judge_id,entry_id,category_id' });
-        if (e) throw e;
+        const k = `${eid}|${cid}`;
+        const cell = scoresRef.current[k] || {};
+        if (cell.value == null && !cell.note) {
+          // Nothing to keep — no score, no note. Delete rather than write a
+          // placeholder row.
+          const { error: e } = await supabase.from('scores').delete()
+            .eq('event_judge_id', ejId).eq('entry_id', eid).eq('category_id', cid);
+          if (e) throw e;
+        } else {
+          // raw_score may be null here (a note with no score yet) — the
+          // column allows that; only a non-null score still has to pass the
+          // category's min/max range.
+          const payload = { event_judge_id: ejId, entry_id: eid, category_id: cid, raw_score: cell.value != null ? cell.value : null, note: cell.note || null, is_self_score: false };
+          const { error: e } = await supabase.from('scores').upsert(payload, { onConflict: 'event_judge_id,entry_id,category_id' });
+          if (e) throw e;
+        }
+        markSynced(k);
       } else if (key.startsWith('n:')) {
         const eid = key.slice(2);
         const payload = { event_judge_id: ejId, entry_id: eid, note: notesRef.current[eid] || null };
@@ -331,17 +386,35 @@ export default function App() {
       retries.current[key] = 0;
       hardFailed.current.delete(key);
     } catch (e) {
-      ok = false;
-      const n = (retries.current[key] || 0) + 1;
-      retries.current[key] = n;
-      if (n <= 5) {
-        dirty.current.add(key);
-        setTimeout(() => flush(key), Math.min(1000 * Math.pow(2, n), 15000));
+      if (key.startsWith('s:') && e && e.code === '23514') {
+        // DB rejected the score as outside the category's range
+        // (check_violation) — shouldn't normally happen, since ScoreInput
+        // already validates against the same min/max, but a category's
+        // range could change mid-session. Don't retry a value the DB will
+        // never accept: drop it back to "not scored" locally so the entry
+        // list's progress count flags it, surface exactly which field needs
+        // fixing, and let every other queued write keep syncing on its own.
+        const [eid, cid] = key.slice(2).split('|');
+        const k = `${eid}|${cid}`;
+        const cur = scoresRef.current[k] || {};
+        const next = { ...scoresRef.current, [k]: { value: null, note: cur.note || '', synced: true } };
+        scoresRef.current = next; setScores(next); mirrorNow(next, notesRef.current);
+        setFieldErrors((prev) => ({ ...prev, [k]: 'That score was rejected by the server — enter a valid value.' }));
+        retries.current[key] = 0;
+        hardFailed.current.delete(key);
       } else {
-        // Retries exhausted — stop hammering Supabase, but keep this flagged
-        // so the status indicator doesn't quietly report "saved" for a write
-        // that never actually landed.
-        hardFailed.current.add(key);
+        ok = false;
+        const n = (retries.current[key] || 0) + 1;
+        retries.current[key] = n;
+        if (n <= 5) {
+          dirty.current.add(key);
+          setTimeout(() => flush(key), Math.min(1000 * Math.pow(2, n), 15000));
+        } else {
+          // Retries exhausted — stop hammering Supabase, but keep this flagged
+          // so the status indicator doesn't quietly report "saved" for a write
+          // that never actually landed.
+          hardFailed.current.add(key);
+        }
       }
     } finally {
       inFlight.current -= 1;
@@ -406,6 +479,21 @@ export default function App() {
     setBusy(true);
     const pending = Array.from(dirty.current);
     await Promise.all(pending.map((k) => flush(k)));
+    const missing = unscoredPairs(entries, categories, scoresRef.current);
+    if (missing.length > 0) {
+      const sameAsShown = missingList && missingList.length === missing.length
+        && missingList.every((m, i) => m.entryNumber === missing[i].entryNumber && m.categoryName === missing[i].categoryName);
+      if (!sameAsShown) {
+        // First time seeing this exact list (or it shrank/changed since
+        // last shown) — surface it and let the judge decide, rather than
+        // submitting an incomplete set silently. Submitting again with the
+        // same list unresolved goes through.
+        setMissingList(missing);
+        setBusy(false);
+        return;
+      }
+    }
+    setMissingList(null);
     const { error: e } = await supabase.from('event_judges').update({ submitted_at: new Date().toISOString() }).eq('id', ejRef.current.id);
     setBusy(false);
     if (e) { setError('Submit failed — your scores are saved. Try submitting again.'); return; }
@@ -499,6 +587,11 @@ export default function App() {
           })}
         </ul>
 
+        {missingList && missingList.length > 0 && (
+          <div className="err" style={{ marginBottom: '8px' }}>
+            Still unscored: {missingList.map((m) => `Entry #${m.entryNumber} — ${m.categoryName}`).join(', ')}. Tap Submit again to submit anyway.
+          </div>
+        )}
         <button className="btn primary" onClick={submitAll} disabled={busy}>{busy ? 'Submitting…' : 'Submit my scores'}</button>
         {error && <div className="err">{error}</div>}
         <p className="muted-note" style={{ marginTop: '12px' }}>You can return and change scores until you submit.</p>
@@ -512,6 +605,7 @@ export default function App() {
             disabled={busy}
             saveStatus={saveStatus}
             lastSavedAt={lastSavedAt}
+            fieldErrors={fieldErrors}
             onCommitScore={(cid, v) => setValue(openEntry, cid, v)}
             onCommitCategoryNote={(cid, n) => setScoreNote(openEntry, cid, n)}
             onCommitEntryNote={(n) => setEntryNote(openEntry, n)}
@@ -535,7 +629,7 @@ export default function App() {
   );
 }
 
-function EntryModal({ entry, categories, scores, note, disabled, saveStatus, lastSavedAt, onCommitScore, onCommitCategoryNote, onCommitEntryNote, onClose }) {
+function EntryModal({ entry, categories, scores, note, disabled, saveStatus, lastSavedAt, fieldErrors, onCommitScore, onCommitCategoryNote, onCommitEntryNote, onClose }) {
   if (!entry) return null;
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -566,6 +660,7 @@ function EntryModal({ entry, categories, scores, note, disabled, saveStatus, las
                   max={max}
                   onCommit={(v) => onCommitScore(c.id, v)}
                   disabled={disabled}
+                  serverError={fieldErrors && fieldErrors[key]}
                 />
                 <CategoryDescription text={c.description} />
                 <div className="note-label">Notes (optional)</div>
