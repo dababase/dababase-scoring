@@ -347,7 +347,7 @@ export default function App() {
     const cur = scoresRef.current[key];
     if (!cur || cur.synced) return;
     const next = { ...scoresRef.current, [key]: { ...cur, synced: true } };
-    scoresRef.current = next; setScores(next);
+    scoresRef.current = next; setScores(next); mirrorNow(next, notesRef.current);
   }
 
   async function flush(key) {
