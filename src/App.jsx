@@ -15,6 +15,24 @@ const CURRENT_CODE_KEY = 'judge_current_event_code';
 const legacyLsKey = (enrollmentId) => `test26_${enrollmentId}`;
 const lsKey = (eventId, enrollmentId) => `scores_${eventId}_${enrollmentId}`;
 
+const DEFAULT_THEME_VARS = { '--amber': '#EF9F27', '--amber-dim': '#C9983A', '--amber-bg': '#1A1300' };
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+// Blend a hex color t% of the way toward black (t in [0,1]) — used to derive
+// a dim/hover shade and a very dark tinted background from an event's single
+// accent hex, so an operator only has to pick one color per event.
+function shadeToward(hex, toHex, t) {
+  const a = parseInt(hex.slice(1), 16);
+  const b = parseInt(toHex.slice(1), 16);
+  const mix = (shift) => {
+    const av = (a >> shift) & 0xff;
+    const bv = (b >> shift) & 0xff;
+    return Math.round(av + (bv - av) * t);
+  };
+  const r = mix(16), g = mix(8), bch = mix(0);
+  return '#' + [r, g, bch].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
 // Unscored categories count as 0 toward the running total — this is a live,
 // provisional view while judging is in progress, not a final placement.
 function entryStats(entryId, categories, scores) {
@@ -146,6 +164,33 @@ export default function App() {
     }, 15000);
     return () => clearInterval(iv);
   }, []);
+
+  // Theme provider: the resolved event's events.theme (nullable jsonb —
+  // background_url, overlay_opacity, accent, logo_url) drives everything
+  // visual via CSS variables on the document root. Null/missing fields fall
+  // back to the dababase defaults baked into index.css's :root block — never
+  // hardcode a specific event's look here.
+  useEffect(() => {
+    const root = document.documentElement;
+    const theme = (eventRow && eventRow.theme) || null;
+    const accent = theme && typeof theme.accent === 'string' && HEX_RE.test(theme.accent) ? theme.accent : null;
+    if (accent) {
+      root.style.setProperty('--amber', accent);
+      root.style.setProperty('--amber-dim', shadeToward(accent, '#000000', 0.25));
+      root.style.setProperty('--amber-bg', shadeToward(accent, '#000000', 0.90));
+    } else {
+      root.style.setProperty('--amber', DEFAULT_THEME_VARS['--amber']);
+      root.style.setProperty('--amber-dim', DEFAULT_THEME_VARS['--amber-dim']);
+      root.style.setProperty('--amber-bg', DEFAULT_THEME_VARS['--amber-bg']);
+    }
+  }, [eventRow]);
+
+  // Page title: event name once resolved, generic fallback otherwise.
+  useEffect(() => {
+    document.title = (eventRow && (eventRow.name || eventRow.event_code))
+      ? `${eventRow.name || eventRow.event_code} — Judge Scoring`
+      : 'Judge Scoring';
+  }, [eventRow]);
 
   async function bootstrap(s) {
     setError('');
@@ -372,10 +417,22 @@ export default function App() {
   // Before eventRow loads (signin screen reached straight off submitCode, no
   // DB round trip yet — see bootstrap()), fall back to what the judge typed.
   const eventLabel = (eventRow && (eventRow.name || eventRow.event_code)) || codeInput || 'Judge Scoring';
+  const theme = (eventRow && eventRow.theme) || null;
+  const overlayOpacity = theme && typeof theme.overlay_opacity === 'number'
+    ? Math.min(1, Math.max(0, theme.overlay_opacity))
+    : 0.7;
 
   return (
-    <div className="wrap">
-      <div className="hero"><img src="https://2026-mothership-meltdown-melt.vercel.app/mothership.jpeg" alt="" /><div className="mask" /></div>
+    <>
+      {theme && theme.background_url && (
+        <div className="bg-artwork" style={{ backgroundImage: `url(${theme.background_url})` }}>
+          <div className="bg-artwork-scrim" style={{ background: `rgba(10,10,10,${overlayOpacity})` }} />
+        </div>
+      )}
+      <div className="wrap">
+      {theme && theme.logo_url && (
+        <div className="logo-header"><img src={theme.logo_url} alt="" className="logo-header-img" /></div>
+      )}
 
       {step === 'code' && (<>
         <div className="eyebrow">Blind Judging</div>
@@ -473,7 +530,8 @@ export default function App() {
           <p className="muted-note">Thanks, {nameInput || 'judge'}. Your scores are locked in for {eventLabel}.</p>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

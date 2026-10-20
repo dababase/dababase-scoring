@@ -1,10 +1,18 @@
 :root{--bg:#0A0A0A;--amber:#EF9F27;--amber-dim:#C9983A;--amber-bg:#1A1300;--text:#FFFFFF;--body:#BBBBBB;--muted:#888888;--faint:#555555;--inactive:#333333}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--body);font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-.wrap{max-width:640px;margin:0 auto;padding:0 20px 64px}
-.hero{position:relative;height:170px;overflow:hidden;border-radius:0 0 12px 12px;margin-bottom:26px}
-.hero img{width:100%;height:100%;object-fit:cover;opacity:.5}
-.hero .mask{position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,10,10,.25),rgba(10,10,10,.96))}
+.wrap{max-width:640px;margin:0 auto;padding:24px 20px 64px;position:relative}
+
+/* Event theming: full-bleed background artwork + dark scrim, applied only
+   when the resolved event has events.theme.background_url set. Sits behind
+   everything at a fixed position so it covers the viewport regardless of
+   .wrap's own width/scroll. */
+.bg-artwork{position:fixed;inset:0;z-index:-1;background-size:cover;background-position:center;background-repeat:no-repeat}
+.bg-artwork-scrim{position:absolute;inset:0}
+
+.logo-header{display:flex;justify-content:center;margin-bottom:20px}
+.logo-header-img{width:110px;height:110px;object-fit:contain}
+
 .eyebrow{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber)}
 h1{font-family:'Playfair Display',serif;font-weight:500;color:var(--text);margin:6px 0 4px;font-size:30px;line-height:1.15}
 .sub{color:var(--muted);font-size:14px;margin-bottom:24px}
