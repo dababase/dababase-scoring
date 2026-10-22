@@ -69,13 +69,11 @@ function sortedEntries(entries, categories, scores, sortOrder) {
   return [...entries].sort((a, b) => a.entry_number - b.entry_number);
 }
 
-// 1st/2nd/3rd + medal for the top of the live ranking; plain numbers past
-// that. Matches the medal pattern from the old platform's rank-list CSS
-// (gold/silver/bronze emoji after the ordinal suffix).
+// Medal for the top of the live ranking; plain numbers past that.
 function rankLabel(position) {
-  if (position === 1) return '1st \u{1F947}';
-  if (position === 2) return '2nd \u{1F948}';
-  if (position === 3) return '3rd \u{1F949}';
+  if (position === 1) return '\u{1F947}';
+  if (position === 2) return '\u{1F948}';
+  if (position === 3) return '\u{1F949}';
   return String(position);
 }
 
