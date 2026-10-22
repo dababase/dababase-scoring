@@ -69,6 +69,14 @@ function sortedEntries(entries, categories, scores, sortOrder) {
   return [...entries].sort((a, b) => a.entry_number - b.entry_number);
 }
 
+// 1st/2nd/3rd for the top of the live ranking; plain numbers past that.
+function rankLabel(position) {
+  if (position === 1) return '1st';
+  if (position === 2) return '2nd';
+  if (position === 3) return '3rd';
+  return String(position);
+}
+
 // Splits on the first sentence-ending punctuation so the modal can show a
 // short teaser with the rest tucked behind a "more" toggle.
 function splitFirstSentence(text) {
@@ -578,7 +586,7 @@ export default function App() {
             const avgMax = categories.length ? categories.reduce((s, c) => s + (c.max_points || 0), 0) / categories.length : 0;
             return (
               <li className="entry-row" key={en.id} onClick={() => setOpenEntry(en.id)}>
-                {sortOrder === 'rank' && <span className="entry-row-pos">{idx + 1}</span>}
+                {sortOrder === 'rank' && <span className="entry-row-pos">{rankLabel(idx + 1)}</span>}
                 <span className="entry-row-num">Entry #{en.entry_number}</span>
                 <span className="entry-row-progress">{scoredCount}/{categories.length}</span>
                 <span className="entry-row-avg">{scoredCount ? avg.toFixed(1) + '/' + avgMax : '—'}</span>

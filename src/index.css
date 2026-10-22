@@ -46,7 +46,7 @@ input.score-input-error{border-color:#ff7a6b}
 .entry-list{list-style:none;padding:0;margin:0 0 18px;display:flex;flex-direction:column;gap:10px}
 .entry-row{display:flex;align-items:center;gap:12px;background:#0f0f0f;border:1px solid var(--inactive);border-radius:12px;padding:14px 16px;cursor:pointer}
 .entry-row:hover{border-color:var(--amber-dim)}
-.entry-row-pos{font-family:'Space Mono',monospace;color:var(--amber);font-size:13px;min-width:16px}
+.entry-row-pos{font-family:'Space Mono',monospace;color:var(--amber);font-size:13px;min-width:28px}
 .entry-row-num{font-family:'Space Mono',monospace;color:var(--text);font-size:14px;letter-spacing:.08em;flex:1}
 .entry-row-progress{font-family:'Space Mono',monospace;color:var(--faint);font-size:12px}
 .entry-row-avg{font-family:'Space Mono',monospace;color:var(--amber);font-size:14px;background:var(--amber-bg);border-radius:6px;padding:3px 8px;min-width:52px;text-align:center}
