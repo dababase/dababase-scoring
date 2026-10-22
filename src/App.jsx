@@ -137,7 +137,7 @@ export default function App() {
   const [scores, setScores] = useState({});
   const [notes, setNotes] = useState({});
   const [openEntry, setOpenEntry] = useState(null);
-  const [sortOrder, setSortOrder] = useState('rank');
+  const [sortOrder, setSortOrder] = useState('sequential');
   const [saveStatus, setSaveStatus] = useState('idle');
   const [lastSavedAt, setLastSavedAt] = useState(null);
   // Per-category messages from a DB-rejected score (check_violation) — keyed
@@ -568,8 +568,8 @@ export default function App() {
         )}
 
         <div className="sort-toggle">
-          <button className={'sort-opt' + (sortOrder === 'rank' ? ' active' : '')} onClick={() => setSortOrder('rank')}>Ranking</button>
           <button className={'sort-opt' + (sortOrder === 'sequential' ? ' active' : '')} onClick={() => setSortOrder('sequential')}>Entry #</button>
+          <button className={'sort-opt' + (sortOrder === 'rank' ? ' active' : '')} onClick={() => setSortOrder('rank')}>Ranking</button>
         </div>
 
         <ul className="entry-list">
@@ -595,6 +595,12 @@ export default function App() {
         <button className="btn primary" onClick={submitAll} disabled={busy}>{busy ? 'Submitting…' : 'Submit my scores'}</button>
         {error && <div className="err">{error}</div>}
         <p className="muted-note" style={{ marginTop: '12px' }}>You can return and change scores until you submit.</p>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginTop: '32px' }}>
+          <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '28px', width: 'auto', borderRadius: '10px' }} />
+          <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '48px', width: 'auto', borderRadius: '10px' }} />
+          <img src="/events/TerpIsle26/high-times.webp" alt="High Times" style={{ height: '36px', width: 'auto', borderRadius: '10px' }} />
+        </div>
 
         {openEntry != null && (
           <EntryModal
