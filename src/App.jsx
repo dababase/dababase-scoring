@@ -106,6 +106,16 @@ function CategoryDescription({ text }) {
   );
 }
 
+function SponsorFooter() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginTop: '32px' }}>
+      <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '28px', width: 'auto', borderRadius: '10px' }} />
+      <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '48px', width: 'auto', borderRadius: '10px' }} />
+      <img src="/events/TerpIsle26/high-times.webp" alt="High Times" style={{ height: '36px', width: 'auto', borderRadius: '10px' }} />
+    </div>
+  );
+}
+
 function timeAgo(date) {
   if (!date) return '';
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -538,6 +548,7 @@ export default function App() {
         <input type="text" value={codeInput} onChange={(e) => setCodeInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitCode()} placeholder="Event code" autoCapitalize="characters" />
         <button className="btn primary" onClick={submitCode}>Continue</button>
         {error && <div className="err">{error}</div>}
+        <SponsorFooter />
       </>)}
 
       {step === 'signin' && (<>
@@ -553,6 +564,7 @@ export default function App() {
         <button className="btn ghost" onClick={signInGuest}>Continue as guest</button>
         {info && <div className="ok">{info}</div>}
         {error && <div className="err">{error}</div>}
+        <SponsorFooter />
       </>)}
 
       {step === 'name' && (<>
@@ -563,6 +575,7 @@ export default function App() {
         <input type="text" value={nameInput} onChange={(e) => setNameInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitName()} placeholder="Your name" />
         <button className="btn primary" onClick={submitName} disabled={busy}>{busy ? 'Starting…' : 'Start scoring'}</button>
         {error && <div className="err">{error}</div>}
+        <SponsorFooter />
       </>)}
 
       {step === 'scoring' && (<>
@@ -604,11 +617,7 @@ export default function App() {
         {error && <div className="err">{error}</div>}
         <p className="muted-note" style={{ marginTop: '12px' }}>You can return and change scores until you submit.</p>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginTop: '32px' }}>
-          <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '28px', width: 'auto', borderRadius: '10px' }} />
-          <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '48px', width: 'auto', borderRadius: '10px' }} />
-          <img src="/events/TerpIsle26/high-times.webp" alt="High Times" style={{ height: '36px', width: 'auto', borderRadius: '10px' }} />
-        </div>
+        <SponsorFooter />
 
         {openEntry != null && (
           <EntryModal
