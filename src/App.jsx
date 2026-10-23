@@ -585,6 +585,7 @@ export default function App() {
         <div className="eyebrow">{eventLabel}{trackRow && trackRow.name ? ` · ${trackRow.name}` : ''}</div>
         <h1>Score the entries</h1>
         <p className="sub">Blind — entry numbers only. Tap an entry to score it.</p>
+        <p className="muted-note" style={{ marginTop: '-16px', marginBottom: '16px' }}>Judge Name: {nameInput || 'Judge'}</p>
         {saveStatus !== 'idle' && (
           <div className={'save-status' + ((saveStatus === 'error' || saveStatus === 'retrying') ? ' save-status-error' : '')}>
             {saveStatusLabel(saveStatus, lastSavedAt)}
