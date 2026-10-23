@@ -530,7 +530,10 @@ export default function App() {
 
   return (
     <>
-      {theme && theme.background_url && (
+      {/* Full-bleed background only once a judge is actually in the scoring
+          window — on the code/sign-in/name screens it stacked visually with
+          the header logo and sponsor footer and felt like too much at once. */}
+      {theme && theme.background_url && step === 'scoring' && (
         <div className="bg-artwork" style={{ backgroundImage: `url(${theme.background_url})` }}>
           <div className="bg-artwork-scrim" style={{ background: `rgba(10,10,10,${overlayOpacity})` }} />
         </div>
