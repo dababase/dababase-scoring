@@ -563,7 +563,7 @@ export default function App() {
         <label>Email sign-in link</label>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" />
         <button className="btn outline" onClick={sendMagic} disabled={busy}>{busy ? 'Sending…' : 'Email me a link'}</button>
-        <p className="muted-note" style={{ marginTop: '8px' }}>Opened this from your email? Keep scoring in that window — switching to a different browser app will sign you out.</p>
+        <p className="muted-note" style={{ marginTop: '8px' }}>Heads up: if you switch to a different browser app, you'll be signed out. Don't worry — nothing is lost. Just go back to your email and tap the link again.</p>
         <div className="divider">or</div>
         <button className="btn ghost" onClick={signInGuest}>Continue as guest</button>
         {info && <div className="ok">{info}</div>}
