@@ -48,14 +48,16 @@ function entryStats(entryId, categories, scores) {
   return { total, scoredCount, avg: categories.length ? total / categories.length : 0 };
 }
 
-// (entry, category) pairs with no confirmed score — surfaced before submit.
+// (entry, category) pairs with no confirmed score — these block submit.
+// `unsaved` marks a value the judge did enter that hasn't reached the DB yet,
+// so they aren't told to score something they can see they already scored.
 function unscoredPairs(entries, categories, scores) {
   const pairs = [];
   for (const en of entries) {
     for (const c of categories) {
       const cell = scores[`${en.id}|${c.id}`];
       if (!cell || cell.value == null || !cell.synced) {
-        pairs.push({ entryNumber: en.entry_number, categoryName: c.name });
+        pairs.push({ entryNumber: en.entry_number, categoryName: c.name, unsaved: !!cell && cell.value != null });
       }
     }
   }
@@ -161,9 +163,9 @@ export default function App() {
   // Per-category messages from a DB-rejected score (check_violation) — keyed
   // entryId|categoryId, shown inline on that exact ScoreInput.
   const [fieldErrors, setFieldErrors] = useState({});
-  // Set right before submit when some (entry, category) pairs aren't scored
-  // yet; submitting again with the same unresolved list proceeds anyway.
-  const [missingList, setMissingList] = useState(null);
+  // Set when a submit is blocked by unscored (entry, category) pairs. The list
+  // itself is derived live from scores, so it shrinks as the judge fills it in.
+  const [showMissing, setShowMissing] = useState(false);
 
   const ejRef = useRef(null);
   const scoresRef = useRef({});
@@ -495,23 +497,18 @@ export default function App() {
   async function submitAll() {
     if (!ejRef.current) return;
     setBusy(true);
-    const pending = Array.from(dirty.current);
+    // Includes writes that exhausted their retries — nothing else retries
+    // those, and a judge whose connection came back would otherwise be stuck.
+    const pending = Array.from(new Set([...dirty.current, ...hardFailed.current]));
     await Promise.all(pending.map((k) => flush(k)));
-    const missing = unscoredPairs(entries, categories, scoresRef.current);
-    if (missing.length > 0) {
-      const sameAsShown = missingList && missingList.length === missing.length
-        && missingList.every((m, i) => m.entryNumber === missing[i].entryNumber && m.categoryName === missing[i].categoryName);
-      if (!sameAsShown) {
-        // First time seeing this exact list (or it shrank/changed since
-        // last shown) — surface it and let the judge decide, rather than
-        // submitting an incomplete set silently. Submitting again with the
-        // same list unresolved goes through.
-        setMissingList(missing);
-        setBusy(false);
-        return;
-      }
+    // Rechecked on every tap: a judge can't submit until every (entry,
+    // category) pair has a confirmed score.
+    if (unscoredPairs(entries, categories, scoresRef.current).length > 0) {
+      setShowMissing(true);
+      setBusy(false);
+      return;
     }
-    setMissingList(null);
+    setShowMissing(false);
     const { error: e } = await supabase.from('event_judges').update({ submitted_at: new Date().toISOString() }).eq('id', ejRef.current.id);
     setBusy(false);
     if (e) { setError('Submit failed — your scores are saved. Try submitting again.'); return; }
@@ -519,6 +516,8 @@ export default function App() {
   }
 
   if (!ready) return (<div className="wrap"><div className="center muted-note">Loading…</div></div>);
+
+  const missing = showMissing ? unscoredPairs(entries, categories, scores) : [];
 
   // Before eventRow loads (signin screen reached straight off submitCode, no
   // DB round trip yet — see bootstrap()), fall back to what the judge typed.
@@ -613,9 +612,9 @@ export default function App() {
           })}
         </ul>
 
-        {missingList && missingList.length > 0 && (
+        {missing.length > 0 && (
           <div className="err" style={{ marginBottom: '8px' }}>
-            Still unscored: {missingList.map((m) => `Entry #${m.entryNumber} — ${m.categoryName}`).join(', ')}. Tap Submit again to submit anyway.
+            Can't submit yet. Still unscored: {missing.map((m) => `Entry #${m.entryNumber} — ${m.categoryName}${m.unsaved ? ' (entered but not saved — check your connection)' : ''}`).join(', ')}.
           </div>
         )}
         <button className="btn primary" onClick={submitAll} disabled={busy}>{busy ? 'Submitting…' : 'Submit my scores'}</button>
