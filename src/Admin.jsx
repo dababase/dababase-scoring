@@ -1,0 +1,412 @@
+import { useState, useEffect, useCallback, Fragment } from 'react';
+import { supabase } from './supabaseClient';
+
+// Operator dashboard at /admin. Every read goes through SECURITY DEFINER RPCs
+// that check the signed-in, verified email against the `admins` table — the
+// judge-facing RLS (own rows only) is untouched.
+
+export const ADMIN_RETURN_KEY = 'admin_return_after_signin';
+const LAST_EVENT_KEY = 'admin_last_event_code';
+const REFRESH_MS = 15000;
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function ago(ts, now) {
+  if (!ts) return '';
+  const s = Math.max(0, Math.floor((now - new Date(ts).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function median(xs) {
+  const v = xs.filter((x) => x != null).map(Number).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+}
+
+export default function Admin() {
+  const [session, setSession] = useState(null);
+  const [ready, setReady] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(null);
+  const [email, setEmail] = useState('');
+  const [info, setInfo] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    document.title = 'Admin — Judge Scoring';
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session); setReady(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => { setSession(s); setReady(true); });
+    return () => { mounted = false; sub.subscription.unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setIsAdmin(null); return; }
+    try { localStorage.removeItem(ADMIN_RETURN_KEY); } catch (_) {}
+    supabase.rpc('is_admin').then(({ data, error: e }) => setIsAdmin(!e && data === true));
+  }, [session && session.user && session.user.id]);
+
+  const redirectTo = window.location.origin + '/admin';
+  function markReturn() { try { localStorage.setItem(ADMIN_RETURN_KEY, String(Date.now())); } catch (_) {} }
+
+  async function signInGoogle() {
+    setError(''); markReturn();
+    const { error: e } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
+    if (e) setError('Google sign-in failed. Try the email link.');
+  }
+  async function sendMagic() {
+    setError(''); setInfo('');
+    const addr = email.trim();
+    if (!addr) { setError('Enter your email first.'); return; }
+    setBusy(true); markReturn();
+    const { error: e } = await supabase.auth.signInWithOtp({ email: addr, options: { emailRedirectTo: redirectTo } });
+    setBusy(false);
+    if (e) setError('Could not send the link. Check the address.');
+    else setInfo('Check your email for a sign-in link. Open it in this same browser.');
+  }
+  async function signOut() { await supabase.auth.signOut(); setIsAdmin(null); }
+
+  if (!ready) return <div className="wrap admin-wrap"><div className="center muted-note">Loading…</div></div>;
+
+  if (!session) {
+    return (
+      <div className="wrap">
+        <div className="eyebrow">Operator</div>
+        <h1>Admin sign-in</h1>
+        <p className="sub">Live judge progress and results. Admin emails only.</p>
+        <button className="btn primary" onClick={signInGoogle}>Continue with Google</button>
+        <div className="divider">or</div>
+        <label>Email sign-in link</label>
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMagic()} placeholder="you@email.com" />
+        <button className="btn outline" onClick={sendMagic} disabled={busy}>{busy ? 'Sending…' : 'Email me a link'}</button>
+        {info && <div className="ok">{info}</div>}
+        {error && <div className="err">{error}</div>}
+      </div>
+    );
+  }
+
+  if (isAdmin === null) return <div className="wrap admin-wrap"><div className="center muted-note">Checking access…</div></div>;
+
+  if (!isAdmin) {
+    return (
+      <div className="wrap">
+        <div className="eyebrow">Operator</div>
+        <h1>No admin access</h1>
+        <p className="sub">{session.user.email || 'This guest session'} isn't on the admin list. Sign out and use an admin email, or ask Nick to add you.</p>
+        <button className="btn outline" onClick={signOut}>Sign out</button>
+      </div>
+    );
+  }
+
+  return <Dashboard userEmail={session.user.email} onSignOut={signOut} />;
+}
+
+function Dashboard({ userEmail, onSignOut }) {
+  const [events, setEvents] = useState([]);
+  const [code, setCode] = useState(() => {
+    const q = new URLSearchParams(window.location.search).get('event');
+    if (q) return q;
+    try { return localStorage.getItem(LAST_EVENT_KEY) || ''; } catch (_) { return ''; }
+  });
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'progress');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    supabase.rpc('admin_events').then(({ data, error: e }) => {
+      if (e) { setError('Could not load events: ' + e.message); return; }
+      setEvents(data || []);
+      if (!code && data && data.length) {
+        const terp = data.find((ev) => ev.event_code === 'TerpIsle26F');
+        setCode((terp || data[0]).event_code);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!code) return;
+    try { localStorage.setItem(LAST_EVENT_KEY, code); } catch (_) {}
+    const p = new URLSearchParams(window.location.search);
+    p.set('event', code); p.set('tab', tab);
+    window.history.replaceState(null, '', '/admin?' + p.toString());
+  }, [code, tab]);
+
+  const ev = events.find((e) => e.event_code.toLowerCase() === (code || '').toLowerCase());
+
+  return (
+    <div className="wrap admin-wrap">
+      <div className="admin-top">
+        <div className="eyebrow">Operator · {userEmail}</div>
+        <button className="btn ghost admin-signout" onClick={onSignOut}>Sign out</button>
+      </div>
+      <h1>{ev ? ev.name : 'Admin'}</h1>
+      <div className="admin-picker">
+        <label htmlFor="admin-event">Event code</label>
+        <select id="admin-event" value={ev ? ev.event_code : code} onChange={(e) => setCode(e.target.value)}>
+          {!ev && code && <option value={code}>{code}</option>}
+          {events.map((e) => (
+            <option key={e.event_id} value={e.event_code}>{e.event_code} — {e.name} ({e.submitted_count}/{e.judge_count} submitted)</option>
+          ))}
+        </select>
+        {ev && <span className="admin-status">Status: {ev.status}</span>}
+      </div>
+      {error && <div className="err">{error}</div>}
+
+      <div className="sort-toggle admin-tabs">
+        {[['progress', 'Progress'], ['results', 'Results'], ['reveal', 'Reveal']].map(([k, label]) => (
+          <button key={k} className={'sort-opt' + (tab === k ? ' active' : '')} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </div>
+
+      {code && tab === 'progress' && <Progress code={code} key={'p' + code} />}
+      {code && tab === 'results' && <Results code={code} key={'r' + code} />}
+      {code && tab === 'reveal' && <Reveal code={code} key={'v' + code} />}
+    </div>
+  );
+}
+
+function useLive(fn, deps) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [loadedAt, setLoadedAt] = useState(null);
+  const [now, setNow] = useState(Date.now());
+  const load = useCallback(async () => {
+    const { data: d, error: e } = await fn();
+    if (e) setError(e.message); else { setError(''); setData(d || []); setLoadedAt(Date.now()); }
+  }, deps);
+  useEffect(() => {
+    load();
+    const iv = setInterval(() => { if (document.visibilityState === 'visible') load(); }, REFRESH_MS);
+    const tick = setInterval(() => setNow(Date.now()), 5000);
+    const onVis = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); clearInterval(tick); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
+  return { data, error, loadedAt, now, reload: load };
+}
+
+function Progress({ code }) {
+  const { data, error, loadedAt, now, reload } = useLive(() => supabase.rpc('admin_judge_progress', { p_event_code: code }), [code]);
+  const [hideTest, setHideTest] = useState(false);
+
+  async function toggleTest(row) {
+    const { error: e } = await supabase.rpc('admin_set_judge_excluded', { p_event_judge_id: row.event_judge_id, p_excluded: !row.excluded, p_reason: 'test' });
+    if (e) alert('Could not update: ' + e.message); else reload();
+  }
+
+  if (!data) return <div className="muted-note">{error || 'Loading…'}</div>;
+
+  const status = (r) => (r.submitted_at ? 'submitted' : r.cells_scored > 0 ? 'progress' : 'idle');
+  const order = { progress: 0, idle: 1, submitted: 2 };
+  const rows = data
+    .filter((r) => !(hideTest && r.excluded))
+    .sort((a, b) => order[status(a)] - order[status(b)] || (b.entries_complete - a.entries_complete) || String(a.display_name).localeCompare(String(b.display_name)));
+  const real = data.filter((r) => !r.excluded);
+  const counts = { submitted: 0, progress: 0, idle: 0 };
+  real.forEach((r) => { counts[status(r)]++; });
+
+  return (
+    <>
+      <div className="admin-stats">
+        <div><b>{real.length}</b><span>enrolled</span></div>
+        <div><b>{counts.submitted}</b><span>submitted</span></div>
+        <div><b>{counts.progress}</b><span>in progress</span></div>
+        <div><b>{counts.idle}</b><span>not started</span></div>
+      </div>
+      <div className="admin-meta">
+        <span>Auto-refreshes every 15s · updated {ago(loadedAt, now)}</span>
+        <label className="admin-check"><input type="checkbox" checked={hideTest} onChange={(e) => setHideTest(e.target.checked)} /> Hide test judges</label>
+        <button className="admin-link" onClick={reload}>Refresh now</button>
+      </div>
+      {error && <div className="err">Refresh failed: {error}</div>}
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead>
+            <tr><th>Judge</th><th>Entries scored</th><th>Submitted</th><th>Last saved</th><th>Test</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const pct = r.entries_total ? Math.round((100 * r.entries_complete) / r.entries_total) : 0;
+              return (
+                <tr key={r.event_judge_id} className={r.excluded ? 'admin-row-test' : ''}>
+                  <td>
+                    <div className="admin-name">{r.display_name || '(no name)'}</div>
+                    {r.email && <div className="admin-sub">{r.email}</div>}
+                  </td>
+                  <td>
+                    <div className="admin-progress"><div style={{ width: pct + '%' }} /></div>
+                    <div className="admin-sub">{r.entries_complete}/{r.entries_total} entries · {r.cells_scored}/{r.cells_total} scores</div>
+                  </td>
+                  <td>{r.submitted_at ? <span className="admin-yes">Yes · {fmtTime(r.submitted_at)}</span> : <span className="admin-no">No</span>}</td>
+                  <td>{r.last_saved_at ? <>{ago(r.last_saved_at, now)}<div className="admin-sub">{fmtTime(r.last_saved_at)}</div></> : '—'}</td>
+                  <td><input type="checkbox" checked={r.excluded} onChange={() => toggleTest(r)} aria-label={`Mark ${r.display_name} as test`} /></td>
+                </tr>
+              );
+            })}
+            {!rows.length && <tr><td colSpan={5} className="muted-note">No judges enrolled yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted-note">"Test" judges are left out of the results leaderboard. Their scores are never changed or deleted.</p>
+    </>
+  );
+}
+
+function Results({ code }) {
+  const { data, error, loadedAt, now, reload } = useLive(() => supabase.rpc('admin_results', { p_event_code: code }), [code]);
+  const [reveal, setReveal] = useState(null);
+  const [showReveal, setShowReveal] = useState(false);
+  const [open, setOpen] = useState(null);
+
+  useEffect(() => {
+    if (!showReveal || reveal) return;
+    supabase.rpc('admin_reveal', { p_event_code: code }).then(({ data: d }) => {
+      const m = {}; (d || []).forEach((r) => { m[r.entry_id] = r; }); setReveal(m);
+    });
+  }, [showReveal, code]);
+
+  if (!data) return <div className="muted-note">{error || 'Loading…'}</div>;
+
+  const tracks = [...new Set(data.map((r) => r.track_name))];
+  const medSd = median(data.map((r) => r.stddev));
+  const maxJudges = Math.max(0, ...data.map((r) => Number(r.judge_count)));
+
+  return (
+    <>
+      <div className="admin-meta">
+        <span>Submitted, non-test judges only · {maxJudges} judges counted · updated {ago(loadedAt, now)}</span>
+        <label className="admin-check"><input type="checkbox" checked={showReveal} onChange={(e) => setShowReveal(e.target.checked)} /> Show strain</label>
+        <button className="admin-link" onClick={reload}>Refresh now</button>
+      </div>
+      <p className="muted-note">Score = each judge's average across categories, then averaged across judges. Spread is the standard deviation of those judge averages; a highlighted spread is more than 1.5× the event's median.</p>
+      {error && <div className="err">Refresh failed: {error}</div>}
+      {tracks.map((t) => {
+        const rows = data.filter((r) => r.track_name === t);
+        let rank = 0;
+        return (
+          <Fragment key={t}>
+            {tracks.length > 1 && <h2 className="admin-h2">{t}</h2>}
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr><th>#</th><th>Entry</th>{showReveal && <th>Strain</th>}<th>Score</th><th>Judges</th><th>Range</th><th>Spread</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const scored = r.score != null;
+                    if (scored) rank++;
+                    const hot = medSd != null && r.stddev != null && Number(r.stddev) > 1.5 * medSd;
+                    const rv = reveal && reveal[r.entry_id];
+                    const isOpen = open === r.entry_id;
+                    return (
+                      <Fragment key={r.entry_id}>
+                        <tr className="admin-click" onClick={() => setOpen(isOpen ? null : r.entry_id)}>
+                          <td className="admin-rank">{scored ? rank : '—'}</td>
+                          <td>Entry #{r.entry_number}</td>
+                          {showReveal && <td>{rv && (rv.strain || rv.brand) ? <>{rv.strain || '—'}<div className="admin-sub">{rv.brand}</div></> : <span className="admin-sub">not mapped</span>}</td>}
+                          <td className="admin-score">{scored ? Number(r.score).toFixed(2) : '—'}</td>
+                          <td className={Number(r.judge_count) < maxJudges ? 'admin-warn' : ''}>{r.judge_count}</td>
+                          <td>{scored ? `${r.min_judge}–${r.max_judge}` : '—'}</td>
+                          <td className={hot ? 'admin-warn' : ''}>{r.stddev != null ? r.stddev : '—'}</td>
+                        </tr>
+                        {isOpen && (
+                          <tr className="admin-detail">
+                            <td colSpan={showReveal ? 7 : 6}>
+                              {r.judge_scores.length ? r.judge_scores.map((j, i) => (
+                                <span key={i} className="admin-chip">{j.judge}: <b>{j.avg}</b></span>
+                              )) : <span className="admin-sub">No submitted scores yet.</span>}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Fragment>
+        );
+      })}
+      <p className="muted-note">Tap a row to see each judge's average for that entry.</p>
+    </>
+  );
+}
+
+// Accepts CSV or tab-separated rows: entry_number, strain, brand, submitter_name
+// (header row optional). Pasted straight from a spreadsheet works.
+function parseMapping(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rows = [];
+  for (const line of lines) {
+    const cells = (line.includes('\t') ? line.split('\t') : line.split(',')).map((c) => c.trim().replace(/^"|"$/g, ''));
+    const n = parseInt(cells[0], 10);
+    if (Number.isNaN(n)) continue; // header or junk
+    rows.push({ entry_number: n, strain: cells[1] || '', brand: cells[2] || '', submitter_name: cells[3] || '' });
+  }
+  return rows;
+}
+
+function Reveal({ code }) {
+  const [rows, setRows] = useState(null);
+  const [text, setText] = useState('');
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data, error: e } = await supabase.rpc('admin_reveal', { p_event_code: code });
+    if (e) setError(e.message); else setRows(data || []);
+  }, [code]);
+  useEffect(() => { load(); }, [load]);
+
+  const parsed = parseMapping(text);
+
+  async function save() {
+    setMsg(''); setError('');
+    if (!parsed.length) { setError('Nothing to save — paste rows starting with an entry number.'); return; }
+    setBusy(true);
+    const { data, error: e } = await supabase.rpc('admin_set_reveal', { p_event_code: code, p_rows: parsed });
+    setBusy(false);
+    if (e) { setError(e.message); return; }
+    setMsg(`Saved ${data} entries.`); setText(''); load();
+  }
+
+  if (!rows) return <div className="muted-note">{error || 'Loading…'}</div>;
+  const mapped = rows.filter((r) => r.strain || r.brand).length;
+
+  return (
+    <>
+      <p className="muted-note">Entry number → strain mapping from the organizer. Operator-only: judges never see this. {mapped}/{rows.length} entries mapped.</p>
+      <label htmlFor="reveal-paste">Paste mapping (entry #, strain, brand, submitter)</label>
+      <textarea id="reveal-paste" className="admin-paste" value={text} onChange={(e) => setText(e.target.value)} placeholder={'1, Strain name, Brand, Submitter\n2, …'} />
+      <button className="btn primary" onClick={save} disabled={busy || !parsed.length}>{busy ? 'Saving…' : `Save ${parsed.length || ''} rows`}</button>
+      {msg && <div className="ok">{msg}</div>}
+      {error && <div className="err">{error}</div>}
+      <div className="admin-table-wrap" style={{ marginTop: 20 }}>
+        <table className="admin-table">
+          <thead><tr>{new Set(rows.map((r) => r.track_name)).size > 1 && <th>Track</th>}<th>Entry</th><th>Strain</th><th>Brand</th><th>Submitter</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.entry_id}>
+                {new Set(rows.map((x) => x.track_name)).size > 1 && <td>{r.track_name}</td>}
+                <td>#{r.entry_number}</td><td>{r.strain || '—'}</td><td>{r.brand || '—'}</td><td>{r.submitter_name || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
