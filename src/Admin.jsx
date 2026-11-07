@@ -523,11 +523,30 @@ function Results({ code }) {
 
 // Accepts CSV or tab-separated rows: entry_number, strain, brand, submitter_name
 // (header row optional). Pasted straight from a spreadsheet works.
+// Commas inside double quotes stay part of the value ("Farms, LLC").
+function splitCsvLine(line) {
+  const out = []; let cur = ''; let q = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (q) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cur += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
 function parseMapping(text) {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const rows = [];
   for (const line of lines) {
-    const cells = (line.includes('\t') ? line.split('\t') : line.split(',')).map((c) => c.trim().replace(/^"|"$/g, ''));
+    const cells = line.includes('\t')
+      ? line.split('\t').map((c) => c.trim().replace(/^"|"$/g, ''))
+      : splitCsvLine(line).map((c) => c.trim());
     const n = parseInt(cells[0], 10);
     if (Number.isNaN(n)) continue; // header or junk
     rows.push({ entry_number: n, strain: cells[1] || '', brand: cells[2] || '', submitter_name: cells[3] || '' });
