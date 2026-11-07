@@ -128,9 +128,10 @@ function Dashboard({ userEmail, onSignOut }) {
     supabase.rpc('admin_events').then(({ data, error: e }) => {
       if (e) { setError('Could not load events: ' + e.message); return; }
       setEvents(data || []);
-      if (!code && data && data.length) {
-        const terp = data.find((ev) => ev.event_code === 'TerpIsle26F');
-        setCode((terp || data[0]).event_code);
+      // Only events in admin_event_scope come back; a stale code from the URL or
+      // localStorage that isn't one of them falls back to the first allowed one.
+      if (data && data.length && !data.some((ev) => ev.event_code.toLowerCase() === (code || '').toLowerCase())) {
+        setCode(data[0].event_code);
       }
     });
   }, []);
@@ -151,13 +152,13 @@ function Dashboard({ userEmail, onSignOut }) {
         <div className="eyebrow">Operator · {userEmail}</div>
         <button className="btn ghost admin-signout" onClick={onSignOut}>Sign out</button>
       </div>
-      <h1>{ev ? ev.name : 'Admin'}</h1>
+      <h1>{ev ? `${ev.name} · ${ev.track_name || ''}` : 'Admin'}</h1>
       <div className="admin-picker">
-        <label htmlFor="admin-event">Event code</label>
-        <select id="admin-event" value={ev ? ev.event_code : code} onChange={(e) => setCode(e.target.value)}>
-          {!ev && code && <option value={code}>{code}</option>}
+        <label htmlFor="admin-event">Track</label>
+        <select id="admin-event" value={ev ? ev.event_code : ''} onChange={(e) => setCode(e.target.value)}>
+          {!ev && <option value="">Loading…</option>}
           {events.map((e) => (
-            <option key={e.event_id} value={e.event_code}>{e.event_code} — {e.name} ({e.submitted_count}/{e.judge_count} submitted)</option>
+            <option key={e.event_id} value={e.event_code}>{e.track_name || e.event_code} ({e.submitted_count}/{e.judge_count} submitted)</option>
           ))}
         </select>
         {ev && <span className="admin-status">Status: {ev.status}</span>}
@@ -170,9 +171,9 @@ function Dashboard({ userEmail, onSignOut }) {
         ))}
       </div>
 
-      {code && tab === 'progress' && <Progress code={code} key={'p' + code} />}
-      {code && tab === 'results' && <Results code={code} key={'r' + code} />}
-      {code && tab === 'reveal' && <Reveal code={code} key={'v' + code} />}
+      {ev && tab === 'progress' && <Progress code={ev.event_code} key={'p' + ev.event_code} />}
+      {ev && tab === 'results' && <Results code={ev.event_code} key={'r' + ev.event_code} />}
+      {ev && tab === 'reveal' && <Reveal code={ev.event_code} key={'v' + ev.event_code} />}
     </div>
   );
 }
