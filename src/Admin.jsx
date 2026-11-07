@@ -309,6 +309,7 @@ function Results({ code }) {
   const [reveal, setReveal] = useState(null);
   const [showReveal, setShowReveal] = useState(false);
   const [open, setOpen] = useState(null);
+  const [compare, setCompare] = useState(false);
 
   useEffect(() => {
     if (!showReveal || reveal) return;
@@ -358,6 +359,32 @@ function Results({ code }) {
     raw.forEach((r) => rows.push([r.judge, r.email, r.submitted_at ? 'yes' : 'no', r.excluded ? 'yes' : 'no', r.track_name, r.entry_number, r.category, r.raw_score]));
     downloadCsv(`${code}-raw-scores.csv`, rows);
   }
+  // One row per counted judge per entry: the category scores, that judge's
+  // average (what they're ranked on) and the rank points it earned. Summing
+  // rank_points by entry reproduces the Rank pts column exactly.
+  function exportWorkings() {
+    const rows = [];
+    tracks.forEach((t) => {
+      const cats = catList(t);
+      rows.push(['track', 'judge', 'entry', ...cats, 'judge_avg', 'rank_points']);
+      const cell = {};
+      counted.filter((r) => r.track_name === t).forEach((r) => {
+        const k = `${r.event_judge_id}|${r.entry_number}`;
+        (cell[k] = cell[k] || { judge: r.judge, ej: r.event_judge_id, entry: r.entry_number, s: {} }).s[r.category] = Number(r.raw_score);
+      });
+      const pts = {};
+      results.filter((r) => r.track_name === t).forEach((r) => (r.judge_scores || []).forEach((j) => { pts[`${j.ej}|${r.entry_number}`] = j.pts; }));
+      Object.values(cell).sort((a, b) => String(a.judge).localeCompare(String(b.judge)) || a.entry - b.entry).forEach((c) => {
+        const vals = cats.map((k) => c.s[k]);
+        const got = vals.filter((v) => v != null);
+        const avg = got.length ? got.reduce((x, y) => x + y, 0) / got.length : null;
+        const p = pts[`${c.ej}|${c.entry}`];
+        rows.push([t, c.judge, c.entry, ...vals, avg == null ? '' : avg.toFixed(3), p == null ? '' : p]);
+      });
+    });
+    downloadCsv(`${code}-workings.csv`, rows);
+  }
+
   function exportResults() {
     const rows = [];
     tracks.forEach((t) => {
@@ -378,10 +405,12 @@ function Results({ code }) {
       <div className="admin-meta">
         <span>Submitted, non-test judges only · {maxJudges} judges counted · updated {ago(loadedAt, now)}</span>
         <label className="admin-check"><input type="checkbox" checked={showReveal} onChange={(e) => setShowReveal(e.target.checked)} /> Show strain</label>
+        <label className="admin-check"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} /> Compare with / without rank scoring</label>
         <button className="admin-link" onClick={reload}>Refresh now</button>
       </div>
       <div className="admin-meta">
         <button className="admin-link" onClick={exportResults}>Download results (CSV)</button>
+        <button className="admin-link" onClick={exportWorkings}>Download workings (CSV)</button>
         <button className="admin-link" onClick={exportRaw}>Download every score (CSV)</button>
       </div>
       {incomplete.length > 0 && (
@@ -397,6 +426,45 @@ function Results({ code }) {
       )}
       <p className="muted-note">Overall placing uses rank points: each judge ranks every entry by their own average across categories (highest = 1 point, lowest = {results.filter((r) => r.track_name === tracks[0]).length} points; identical scores split the places), points are added up, and the lowest total wins. Only judges who scored every entry rank. Equal points are broken by Avg, the plain average across judges; only if both match do entries share a rank (marked =). Category columns are the plain average of counted judges' scores in that category. Spread is the standard deviation of judge averages; highlighted when more than 1.5× the event's median.</p>
       {error && <div className="err">Refresh failed: {error}</div>}
+      {compare && tracks.map((t) => {
+        const withRank = rankRows(results.filter((r) => r.track_name === t));
+        // Without rank scoring: plain average across judges, highest first.
+        const byAvg = [...withRank].filter((r) => r.score != null).sort((a, b) => Number(b.score) - Number(a.score));
+        const avgRank = {};
+        let prev = null; let prevRank = 0;
+        byAvg.forEach((r, i) => {
+          const s = Number(r.score).toFixed(3);
+          const rk = s === prev ? prevRank : i + 1;
+          avgRank[r.entry_id] = rk; prev = s; prevRank = rk;
+        });
+        return (
+          <Fragment key={'c' + t}>
+            <h2 className="admin-h2">{tracks.length > 1 ? `${t}: ` : ''}With vs without rank scoring</h2>
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead><tr><th>With rank scoring</th><th>Rank pts</th><th>Without (avg only)</th><th>Avg</th><th>Moved</th></tr></thead>
+                <tbody>
+                  {withRank.filter((r) => r.rank != null).map((r) => {
+                    const a = avgRank[r.entry_id];
+                    const diff = a != null ? a - r.rank : null; // positive = rank scoring moved it up
+                    const rv = showReveal && reveal && reveal[r.entry_id];
+                    return (
+                      <tr key={r.entry_id}>
+                        <td><b>{r.tied ? '=' : ''}{r.rank}</b> · Entry #{r.entry_number}{rv && rv.strain ? <div className="admin-sub">{rv.strain}</div> : null}</td>
+                        <td>{Number(r.rank_points)}</td>
+                        <td>{a ?? '—'}</td>
+                        <td>{Number(r.score).toFixed(2)}</td>
+                        <td className={diff ? 'admin-warn' : ''}>{diff == null || diff === 0 ? '—' : diff > 0 ? `▲ ${diff}` : `▼ ${-diff}`}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="muted-note">"Moved" is how many places rank scoring moved the entry compared with ranking by plain average (▲ up, ▼ down).</p>
+          </Fragment>
+        );
+      })}
       {tracks.map((t) => {
         const cats = catList(t);
         const rows = rankRows(results.filter((r) => r.track_name === t));
