@@ -264,8 +264,46 @@ function Progress({ code }) {
   );
 }
 
+function csvCell(v) {
+  if (v == null) return '';
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadCsv(filename, rows) {
+  const text = rows.map((r) => r.map(csvCell).join(',')).join('\n');
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Shared ranks for equal scores (1, 2, 2, 4). Scores compare at the 3 decimals
+// admin_results returns, so float noise can't split a real tie.
+function rankRows(rows) {
+  let prev = null; let prevRank = 0; let n = 0;
+  const out = rows.map((r) => {
+    if (r.score == null) return { ...r, rank: null };
+    n++;
+    const s = Number(r.score).toFixed(3);
+    const rank = s === prev ? prevRank : n;
+    prev = s; prevRank = rank;
+    return { ...r, rank };
+  });
+  const counts = {};
+  out.forEach((r) => { if (r.rank != null) counts[r.rank] = (counts[r.rank] || 0) + 1; });
+  return out.map((r) => ({ ...r, tied: r.rank != null && counts[r.rank] > 1 }));
+}
+
 function Results({ code }) {
-  const { data, error, loadedAt, now, reload } = useLive(() => supabase.rpc('admin_results', { p_event_code: code }), [code]);
+  const { data, error, loadedAt, now, reload } = useLive(async () => {
+    const [res, raw] = await Promise.all([
+      supabase.rpc('admin_results', { p_event_code: code }),
+      supabase.rpc('admin_score_rows', { p_event_code: code }),
+    ]);
+    if (res.error || raw.error) return { data: null, error: res.error || raw.error };
+    return { data: { results: res.data || [], raw: raw.data || [] }, error: null };
+  }, [code]);
   const [reveal, setReveal] = useState(null);
   const [showReveal, setShowReveal] = useState(false);
   const [open, setOpen] = useState(null);
@@ -277,11 +315,61 @@ function Results({ code }) {
     });
   }, [showReveal, code]);
 
-  if (!data) return <div className="muted-note">{error || 'Loading…'}</div>;
+  if (!data || !data.results) return <div className="muted-note">{error || 'Loading…'}</div>;
 
-  const tracks = [...new Set(data.map((r) => r.track_name))];
-  const medSd = median(data.map((r) => r.stddev));
-  const maxJudges = Math.max(0, ...data.map((r) => Number(r.judge_count)));
+  const { results, raw } = data;
+  const tracks = [...new Set(results.map((r) => r.track_name))];
+  const medSd = median(results.map((r) => r.stddev));
+  const maxJudges = Math.max(0, ...results.map((r) => Number(r.judge_count)));
+
+  // Category columns in display order, per track.
+  const catsByTrack = {};
+  raw.forEach((r) => {
+    const m = (catsByTrack[r.track_name] = catsByTrack[r.track_name] || {});
+    m[r.category] = r.category_order;
+  });
+  const catList = (t) => Object.entries(catsByTrack[t] || {}).sort((a, b) => a[1] - b[1]).map(([name]) => name);
+
+  // Per-category average across the same judges admin_results counts.
+  const counted = raw.filter((r) => r.submitted_at && !r.excluded);
+  const catAvg = {};
+  counted.forEach((r) => {
+    const k = `${r.track_name}|${r.entry_number}|${r.category}`;
+    const a = (catAvg[k] = catAvg[k] || { sum: 0, n: 0 });
+    a.sum += Number(r.raw_score); a.n++;
+  });
+  const catVal = (t, n, c) => { const a = catAvg[`${t}|${n}|${c}`]; return a ? a.sum / a.n : null; };
+
+  // Judges with scores who are NOT counted: not submitted (and not marked test).
+  const totalCells = {};
+  tracks.forEach((t) => { totalCells[t] = results.filter((r) => r.track_name === t).length * catList(t).length; });
+  const byJudge = {};
+  raw.forEach((r) => {
+    const j = (byJudge[r.event_judge_id] = byJudge[r.event_judge_id] || { judge: r.judge, email: r.email, submitted: !!r.submitted_at, excluded: r.excluded, track: r.track_name, n: 0 });
+    j.n++;
+  });
+  const incomplete = Object.values(byJudge).filter((j) => !j.excluded && (!j.submitted || j.n < (totalCells[j.track] || 0)))
+    .sort((a, b) => b.n - a.n);
+
+  function exportRaw() {
+    const rows = [['judge', 'email', 'submitted', 'test', 'track', 'entry', 'category', 'score']];
+    raw.forEach((r) => rows.push([r.judge, r.email, r.submitted_at ? 'yes' : 'no', r.excluded ? 'yes' : 'no', r.track_name, r.entry_number, r.category, r.raw_score]));
+    downloadCsv(`${code}-raw-scores.csv`, rows);
+  }
+  function exportResults() {
+    const rows = [];
+    tracks.forEach((t) => {
+      const cats = catList(t);
+      rows.push(['track', 'rank', 'tied', 'entry', ...(showReveal ? ['strain', 'brand'] : []), 'score', ...cats, 'judges', 'min_judge', 'max_judge', 'spread']);
+      rankRows(results.filter((r) => r.track_name === t)).forEach((r) => {
+        const rv = reveal && reveal[r.entry_id];
+        rows.push([t, r.rank, r.tied ? 'yes' : '', r.entry_number, ...(showReveal ? [rv && rv.strain, rv && rv.brand] : []),
+          r.score, ...cats.map((c) => { const v = catVal(t, r.entry_number, c); return v == null ? '' : v.toFixed(3); }),
+          r.judge_count, r.min_judge, r.max_judge, r.stddev]);
+      });
+    });
+    downloadCsv(`${code}-results.csv`, rows);
+  }
 
   return (
     <>
@@ -290,40 +378,56 @@ function Results({ code }) {
         <label className="admin-check"><input type="checkbox" checked={showReveal} onChange={(e) => setShowReveal(e.target.checked)} /> Show strain</label>
         <button className="admin-link" onClick={reload}>Refresh now</button>
       </div>
-      <p className="muted-note">Score = each judge's average across categories, then averaged across judges. Spread is the standard deviation of those judge averages; a highlighted spread is more than 1.5× the event's median.</p>
+      <div className="admin-meta">
+        <button className="admin-link" onClick={exportResults}>Download results (CSV)</button>
+        <button className="admin-link" onClick={exportRaw}>Download every score (CSV)</button>
+      </div>
+      {incomplete.length > 0 && (
+        <div className="admin-callout">
+          <b>{incomplete.length} judge{incomplete.length === 1 ? '' : 's'} not counted — incomplete or not submitted</b>
+          <ul>
+            {incomplete.map((j, i) => (
+              <li key={i}>{j.judge || '(no name)'}: {j.n}/{totalCells[j.track] || '?'} scores{j.submitted ? ', submitted' : ', not submitted'}</li>
+            ))}
+          </ul>
+          <span className="admin-sub">Their scores are in "Download every score" (submitted = no). Mark a judge Test on Progress to drop them from this list.</span>
+        </div>
+      )}
+      <p className="muted-note">Score = each judge's average across categories, then averaged across judges. Category columns are the average of every counted judge's score in that category. Equal scores share a rank (marked =). Spread is the standard deviation of judge averages; highlighted when more than 1.5× the event's median.</p>
       {error && <div className="err">Refresh failed: {error}</div>}
       {tracks.map((t) => {
-        const rows = data.filter((r) => r.track_name === t);
-        let rank = 0;
+        const cats = catList(t);
+        const rows = rankRows(results.filter((r) => r.track_name === t));
+        const cols = 6 + cats.length + (showReveal ? 1 : 0);
         return (
           <Fragment key={t}>
             {tracks.length > 1 && <h2 className="admin-h2">{t}</h2>}
             <div className="admin-table-wrap">
               <table className="admin-table">
                 <thead>
-                  <tr><th>#</th><th>Entry</th>{showReveal && <th>Strain</th>}<th>Score</th><th>Judges</th><th>Range</th><th>Spread</th></tr>
+                  <tr><th>#</th><th>Entry</th>{showReveal && <th>Strain</th>}<th>Score</th>{cats.map((c) => <th key={c}>{c}</th>)}<th>Judges</th><th>Range</th><th>Spread</th></tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => {
                     const scored = r.score != null;
-                    if (scored) rank++;
                     const hot = medSd != null && r.stddev != null && Number(r.stddev) > 1.5 * medSd;
                     const rv = reveal && reveal[r.entry_id];
                     const isOpen = open === r.entry_id;
                     return (
                       <Fragment key={r.entry_id}>
                         <tr className="admin-click" onClick={() => setOpen(isOpen ? null : r.entry_id)}>
-                          <td className="admin-rank">{scored ? rank : '—'}</td>
+                          <td className="admin-rank">{scored ? (r.tied ? `=${r.rank}` : r.rank) : '—'}</td>
                           <td>Entry #{r.entry_number}</td>
                           {showReveal && <td>{rv && (rv.strain || rv.brand) ? <>{rv.strain || '—'}<div className="admin-sub">{rv.brand}</div></> : <span className="admin-sub">not mapped</span>}</td>}
                           <td className="admin-score">{scored ? Number(r.score).toFixed(2) : '—'}</td>
+                          {cats.map((c) => { const v = catVal(t, r.entry_number, c); return <td key={c}>{v == null ? '—' : v.toFixed(1)}</td>; })}
                           <td className={Number(r.judge_count) < maxJudges ? 'admin-warn' : ''}>{r.judge_count}</td>
                           <td>{scored ? `${r.min_judge}–${r.max_judge}` : '—'}</td>
                           <td className={hot ? 'admin-warn' : ''}>{r.stddev != null ? r.stddev : '—'}</td>
                         </tr>
                         {isOpen && (
                           <tr className="admin-detail">
-                            <td colSpan={showReveal ? 7 : 6}>
+                            <td colSpan={cols}>
                               {r.judge_scores.length ? r.judge_scores.map((j, i) => (
                                 <span key={i} className="admin-chip">{j.judge}: <b>{j.avg}</b></span>
                               )) : <span className="admin-sub">No submitted scores yet.</span>}

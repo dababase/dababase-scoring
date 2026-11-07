@@ -107,6 +107,10 @@ textarea:focus{outline:none;border-color:var(--amber-dim)}
 .admin-score{font-family:'Space Mono',monospace;color:var(--text)}
 .admin-warn{color:#ff9f6b;font-weight:600}
 .admin-detail td{background:#0c0c0c}
+.admin-callout{border:1px solid #ff9f6b55;background:#ff9f6b12;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:14px}
+.admin-callout b{color:#ff9f6b}
+.admin-callout ul{margin:6px 0 8px 18px;padding:0}
+.admin-callout li{margin:2px 0}
 .admin-chip{display:inline-block;margin:3px 6px 3px 0;padding:3px 8px;border-radius:6px;background:#161616;font-size:12px}
 .admin-h2{font-family:'Playfair Display',serif;font-weight:500;color:var(--text);font-size:20px;margin:20px 0 8px}
 textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-size:13px}
