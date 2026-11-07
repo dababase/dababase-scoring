@@ -279,14 +279,15 @@ function downloadCsv(filename, rows) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// Shared ranks for equal scores (1, 2, 2, 4). Scores compare at the 3 decimals
-// admin_results returns, so float noise can't split a real tie.
+// Rows arrive ordered by rank points (lowest wins), then average score.
+// Shared ranks (1, 2, 2, 4) only when BOTH are equal — the average is the
+// tie-breaker. Compared at fixed decimals so float noise can't split a tie.
 function rankRows(rows) {
   let prev = null; let prevRank = 0; let n = 0;
   const out = rows.map((r) => {
-    if (r.score == null) return { ...r, rank: null };
+    if (r.rank_points == null) return { ...r, rank: null };
     n++;
-    const s = Number(r.score).toFixed(3);
+    const s = Number(r.rank_points).toFixed(2) + '|' + Number(r.score).toFixed(3);
     const rank = s === prev ? prevRank : n;
     prev = s; prevRank = rank;
     return { ...r, rank };
@@ -361,11 +362,11 @@ function Results({ code }) {
     const rows = [];
     tracks.forEach((t) => {
       const cats = catList(t);
-      rows.push(['track', 'rank', 'tied', 'entry', ...(showReveal ? ['strain', 'brand'] : []), 'score', ...cats, 'judges', 'min_judge', 'max_judge', 'spread']);
+      rows.push(['track', 'rank', 'tied', 'entry', ...(showReveal ? ['strain', 'brand'] : []), 'rank_points', 'judges_ranked', 'avg_score', ...cats, 'judges', 'min_judge', 'max_judge', 'spread']);
       rankRows(results.filter((r) => r.track_name === t)).forEach((r) => {
         const rv = reveal && reveal[r.entry_id];
         rows.push([t, r.rank, r.tied ? 'yes' : '', r.entry_number, ...(showReveal ? [rv && rv.strain, rv && rv.brand] : []),
-          r.score, ...cats.map((c) => { const v = catVal(t, r.entry_number, c); return v == null ? '' : v.toFixed(3); }),
+          r.rank_points, r.ranked_judges, r.score, ...cats.map((c) => { const v = catVal(t, r.entry_number, c); return v == null ? '' : v.toFixed(3); }),
           r.judge_count, r.min_judge, r.max_judge, r.stddev]);
       });
     });
@@ -385,7 +386,7 @@ function Results({ code }) {
       </div>
       {incomplete.length > 0 && (
         <div className="admin-callout">
-          <b>{incomplete.length} judge{incomplete.length === 1 ? '' : 's'} not counted — incomplete or not submitted</b>
+          <b>{incomplete.length} judge{incomplete.length === 1 ? '' : 's'} incomplete or not submitted — left out of rank points</b>
           <ul>
             {incomplete.map((j, i) => (
               <li key={i}>{j.judge || '(no name)'}: {j.n}/{totalCells[j.track] || '?'} scores{j.submitted ? ', submitted' : ', not submitted'}</li>
@@ -394,33 +395,36 @@ function Results({ code }) {
           <span className="admin-sub">Their scores are in "Download every score" (submitted = no). Mark a judge Test on Progress to drop them from this list.</span>
         </div>
       )}
-      <p className="muted-note">Score = each judge's average across categories, then averaged across judges. Category columns are the average of every counted judge's score in that category. Equal scores share a rank (marked =). Spread is the standard deviation of judge averages; highlighted when more than 1.5× the event's median.</p>
+      <p className="muted-note">Overall placing uses rank points: each judge ranks every entry by their own average across categories (highest = 1 point, lowest = {results.filter((r) => r.track_name === tracks[0]).length} points; identical scores split the places), points are added up, and the lowest total wins. Only judges who scored every entry rank. Equal points are broken by Avg, the plain average across judges; only if both match do entries share a rank (marked =). Category columns are the plain average of counted judges' scores in that category. Spread is the standard deviation of judge averages; highlighted when more than 1.5× the event's median.</p>
       {error && <div className="err">Refresh failed: {error}</div>}
       {tracks.map((t) => {
         const cats = catList(t);
         const rows = rankRows(results.filter((r) => r.track_name === t));
-        const cols = 6 + cats.length + (showReveal ? 1 : 0);
+        const cols = 7 + cats.length + (showReveal ? 1 : 0);
+        const maxRanked = Math.max(0, ...rows.map((r) => Number(r.ranked_judges)));
         return (
           <Fragment key={t}>
             {tracks.length > 1 && <h2 className="admin-h2">{t}</h2>}
             <div className="admin-table-wrap">
               <table className="admin-table">
                 <thead>
-                  <tr><th>#</th><th>Entry</th>{showReveal && <th>Strain</th>}<th>Score</th>{cats.map((c) => <th key={c}>{c}</th>)}<th>Judges</th><th>Range</th><th>Spread</th></tr>
+                  <tr><th>#</th><th>Entry</th>{showReveal && <th>Strain</th>}<th>Rank pts</th><th>Avg</th>{cats.map((c) => <th key={c}>{c}</th>)}<th>Judges</th><th>Range</th><th>Spread</th></tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => {
                     const scored = r.score != null;
+                    const ranked = r.rank_points != null;
                     const hot = medSd != null && r.stddev != null && Number(r.stddev) > 1.5 * medSd;
                     const rv = reveal && reveal[r.entry_id];
                     const isOpen = open === r.entry_id;
                     return (
                       <Fragment key={r.entry_id}>
                         <tr className="admin-click" onClick={() => setOpen(isOpen ? null : r.entry_id)}>
-                          <td className="admin-rank">{scored ? (r.tied ? `=${r.rank}` : r.rank) : '—'}</td>
+                          <td className="admin-rank">{ranked ? (r.tied ? `=${r.rank}` : r.rank) : '—'}</td>
                           <td>Entry #{r.entry_number}</td>
                           {showReveal && <td>{rv && (rv.strain || rv.brand) ? <>{rv.strain || '—'}<div className="admin-sub">{rv.brand}</div></> : <span className="admin-sub">not mapped</span>}</td>}
-                          <td className="admin-score">{scored ? Number(r.score).toFixed(2) : '—'}</td>
+                          <td className="admin-score">{ranked ? Number(r.rank_points).toString() : '—'}{ranked && Number(r.ranked_judges) < maxRanked && <div className="admin-sub admin-warn">{r.ranked_judges} judges</div>}</td>
+                          <td>{scored ? Number(r.score).toFixed(2) : '—'}</td>
                           {cats.map((c) => { const v = catVal(t, r.entry_number, c); return <td key={c}>{v == null ? '—' : v.toFixed(1)}</td>; })}
                           <td className={Number(r.judge_count) < maxJudges ? 'admin-warn' : ''}>{r.judge_count}</td>
                           <td>{scored ? `${r.min_judge}–${r.max_judge}` : '—'}</td>
@@ -430,7 +434,7 @@ function Results({ code }) {
                           <tr className="admin-detail">
                             <td colSpan={cols}>
                               {r.judge_scores.length ? r.judge_scores.map((j, i) => (
-                                <span key={i} className="admin-chip">{j.judge}: <b>{j.avg}</b></span>
+                                <span key={i} className="admin-chip">{j.judge}: <b>{j.avg}</b>{j.pts != null && <> · {Number(j.pts)} pt{Number(j.pts) === 1 ? '' : 's'}</>}</span>
                               )) : <span className="admin-sub">No submitted scores yet.</span>}
                             </td>
                           </tr>
@@ -444,7 +448,7 @@ function Results({ code }) {
           </Fragment>
         );
       })}
-      <p className="muted-note">Tap a row to see each judge's average for that entry.</p>
+      <p className="muted-note">Tap a row to see each judge's average and rank points for that entry.</p>
     </>
   );
 }
