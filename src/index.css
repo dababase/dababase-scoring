@@ -60,6 +60,10 @@ input.score-input-error{border-color:#ff7a6b}
 .close-btn{background:var(--inactive);border:none;color:var(--text);font-size:20px;line-height:1;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .close-btn:hover{background:var(--amber-dim);color:#1a1200}
 .modal-body{overflow-y:auto;padding:20px}
+.guide-btn{display:inline-block;background:transparent;border:1px solid var(--inactive);color:var(--text);border-radius:999px;padding:8px 14px;font-size:14px;font-family:Inter,sans-serif;cursor:pointer;margin:0 0 16px}
+.guide-modal{max-height:92vh}
+.guide-body{padding:12px}
+.guide-page{display:block;width:100%;height:auto;border-radius:8px;margin:0 0 12px;background:#fff}
 @media (min-width:640px){.modal-overlay{align-items:center}.modal{border-radius:16px}}
 @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 textarea{width:100%;background:#111;border:1px solid var(--inactive);border-radius:8px;padding:10px 12px;color:var(--body);font-size:14px;font-family:Inter,sans-serif;resize:vertical;min-height:50px}

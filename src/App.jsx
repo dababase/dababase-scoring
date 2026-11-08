@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { EVENT_CODE } from './config';
+import { EVENT_CODE, GUIDE_PAGES } from './config';
 import ScoreInput from './ScoreInput';
 
 // Persists across page loads (including the OAuth-redirect round trip) and
@@ -168,6 +168,7 @@ export default function App() {
   const [showMissing, setShowMissing] = useState(false);
   // Last-chance window shown once every score is in, before they're locked.
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const ejRef = useRef(null);
   const scoresRef = useRef({});
@@ -605,6 +606,9 @@ export default function App() {
         <h1>Score the entries</h1>
         <p className="sub">Blind — entry numbers only. Tap an entry to score it.</p>
         <p className="muted-note" style={{ marginTop: '-16px', marginBottom: '16px' }}>Judge Name: {nameInput || 'Judge'}</p>
+        {GUIDE_PAGES.length > 0 && (
+          <button className="guide-btn" onClick={() => setGuideOpen(true)}>📖 Judging guide</button>
+        )}
         {saveStatus !== 'idle' && (
           <div className={'save-status' + ((saveStatus === 'error' || saveStatus === 'retrying') ? ' save-status-error' : '')}>
             {saveStatusLabel(saveStatus, lastSavedAt)}
@@ -657,6 +661,8 @@ export default function App() {
           </div>
         )}
 
+        {guideOpen && <GuideModal onClose={() => setGuideOpen(false)} />}
+
         {openEntry != null && (
           <EntryModal
             entry={entries.find((e) => e.id === openEntry)}
@@ -687,6 +693,33 @@ export default function App() {
       )}
       </div>
     </>
+  );
+}
+
+// Read-only judging guide: page images listed in config.js GUIDE_PAGES
+// (served from /public). Opening it touches no scoring state, so closing
+// returns the judge exactly where they were.
+function GuideModal({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal guide-modal" role="dialog" aria-modal="true" aria-labelledby="guide-title" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 id="guide-title">Judging guide</h2>
+          <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <div className="modal-body guide-body">
+          {GUIDE_PAGES.map((src, i) => (
+            <img key={src} src={src} alt={`Judging guide page ${i + 1} of ${GUIDE_PAGES.length}`} loading={i === 0 ? 'eager' : 'lazy'} className="guide-page" />
+          ))}
+          <button className="btn outline" onClick={onClose}>Back to scoring</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
