@@ -48,7 +48,7 @@ export const GUIDE_DRAFT = [
   ] },
 
   { h: 'Transparency & Exposure' },
-  { p: 'We encourage you to share your judging experience! Tag **@HeadyHappeningSesh** and **@FireFarmsMaui** and help keep our traditions alive while inspiring future connoisseurs.' },
+  { p: 'We encourage you to share your judging experience! Tag **@HeadyHappeningSesh**, **@FireFarmsMaui** and **@dababase.app** and help keep our traditions alive while inspiring future connoisseurs.' },
 ];
 
 // Hidden until the drafted Flower wording above is approved.
