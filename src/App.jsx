@@ -312,17 +312,23 @@ export default function App() {
     const oldKey = legacyLsKey(enrollment.id);
     const newKey = lsKey(ev.id, enrollment.id);
     const unsyncedKeys = new Set();
+    // Skip anything saved on this device for a category or entry that no
+    // longer exists (e.g. a category removed before judging). The DB would
+    // reject it forever and the save status would never clear.
+    const catIds = new Set((cats || []).map((c) => c.id));
+    const entIds = new Set((ents || []).map((e) => e.id));
+    const stillExists = (k) => { const [eid, cid] = k.split('|'); return entIds.has(eid) && catIds.has(cid); };
     try {
       const old = JSON.parse(localStorage.getItem(oldKey) || 'null');
       if (old && old.scores) {
-        for (const [k, v] of Object.entries(old.scores)) { sMap[k] = { value: v.value, note: v.note || '', synced: false }; unsyncedKeys.add(k); }
+        for (const [k, v] of Object.entries(old.scores)) { if (!stillExists(k)) continue; sMap[k] = { value: v.value, note: v.note || '', synced: false }; unsyncedKeys.add(k); }
       }
       if (old && old.notes) Object.assign(nMap, old.notes);
     } catch (_) {}
     try {
       const current = JSON.parse(localStorage.getItem(newKey) || 'null');
       if (current && current.scores) {
-        for (const [k, v] of Object.entries(current.scores)) { sMap[k] = { value: v.value, note: v.note || '', synced: false }; unsyncedKeys.add(k); }
+        for (const [k, v] of Object.entries(current.scores)) { if (!stillExists(k)) continue; sMap[k] = { value: v.value, note: v.note || '', synced: false }; unsyncedKeys.add(k); }
       }
       if (current && current.notes) Object.assign(nMap, current.notes);
     } catch (_) {}
@@ -424,6 +430,17 @@ export default function App() {
         const next = { ...scoresRef.current, [k]: { value: null, note: cur.note || '', synced: true } };
         scoresRef.current = next; setScores(next); mirrorNow(next, notesRef.current);
         setFieldErrors((prev) => ({ ...prev, [k]: 'That score was rejected by the server — enter a valid value.' }));
+        retries.current[key] = 0;
+        hardFailed.current.delete(key);
+      } else if (e && e.code === '23503') {
+        // foreign_key_violation: the category or entry was removed while this
+        // page was open. Nothing to save it against, so drop it instead of
+        // retrying forever.
+        if (key.startsWith('s:')) {
+          const next = { ...scoresRef.current };
+          delete next[key.slice(2)];
+          scoresRef.current = next; setScores(next); mirrorNow(next, notesRef.current);
+        }
         retries.current[key] = 0;
         hardFailed.current.delete(key);
       } else {
