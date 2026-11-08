@@ -15,6 +15,7 @@ export const GUIDE_DRAFT = [
     '**Ash Quality** – Does it burn clean and even? Does the ash turn a light gray to white, or is it dark and sooty from contaminants, residual nutrients, or an incomplete cure/flush? How does the hit feel on your throat and lungs?',
     '**Experience** – How is the high? How is the lasting taste on your palate?',
   ] },
+  { p: '**Why no Appearance?** There are both indoor and outdoor entries this year, so Appearance is not scored. We want every category being scored to be a fair playing field.' },
 
   { h: 'Scoring Format' },
   { p: 'Each sample should be scored out of **100 points**. Once complete, submit your final scorecard with the **Submit my scores** button at the bottom of the screen.' },
