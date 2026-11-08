@@ -111,10 +111,13 @@ function CategoryDescription({ text }) {
 
 function SponsorFooter() {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginTop: '32px' }}>
-      <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '28px', width: 'auto', borderRadius: '10px' }} />
-      <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '48px', width: 'auto', borderRadius: '10px' }} />
-      <img src="/events/TerpIsle26/high-times.webp" alt="High Times" style={{ height: '36px', width: 'auto', borderRadius: '10px' }} />
+    // Sized by visual area, not height: wide wordmarks get less height so all
+    // four read about the same size. Fits one row at 375px wide.
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', marginTop: '32px' }}>
+      <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '26px', width: 'auto', borderRadius: '8px' }} />
+      <img src="/events/TerpIsle26/fire-farms.webp" alt="Fire Farms Maui" style={{ height: '44px', width: '44px', borderRadius: '50%' }} />
+      <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '44px', width: 'auto', borderRadius: '10px' }} />
+      <img src="/events/TerpIsle26/high-times.webp" alt="High Times" style={{ height: '30px', width: 'auto', borderRadius: '8px' }} />
     </div>
   );
 }
