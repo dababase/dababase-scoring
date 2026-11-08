@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { EVENT_CODE, GUIDE_PAGES } from './config';
+import { EVENT_CODE } from './config';
+import { GUIDE } from './guide';
 import ScoreInput from './ScoreInput';
 
 // Persists across page loads (including the OAuth-redirect round trip) and
@@ -606,7 +607,7 @@ export default function App() {
         <h1>Score the entries</h1>
         <p className="sub">Blind — entry numbers only. Tap an entry to score it.</p>
         <p className="muted-note" style={{ marginTop: '-16px', marginBottom: '16px' }}>Judge Name: {nameInput || 'Judge'}</p>
-        {GUIDE_PAGES.length > 0 && (
+        {GUIDE.length > 0 && (
           <button className="guide-btn" onClick={() => setGuideOpen(true)}>📖 Judging guide</button>
         )}
         {saveStatus !== 'idle' && (
@@ -696,9 +697,14 @@ export default function App() {
   );
 }
 
-// Read-only judging guide: page images listed in config.js GUIDE_PAGES
-// (served from /public). Opening it touches no scoring state, so closing
-// returns the judge exactly where they were.
+// **bold** spans inside guide text.
+function guideInline(text) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith('**') && part.endsWith('**') ? <strong key={i}>{part.slice(2, -2)}</strong> : part);
+}
+
+// Read-only judging guide from src/guide.js. Opening it touches no scoring
+// state, so closing returns the judge exactly where they were.
 function GuideModal({ onClose }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -713,9 +719,12 @@ function GuideModal({ onClose }) {
           <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
         </div>
         <div className="modal-body guide-body">
-          {GUIDE_PAGES.map((src, i) => (
-            <img key={src} src={src} alt={`Judging guide page ${i + 1} of ${GUIDE_PAGES.length}`} loading={i === 0 ? 'eager' : 'lazy'} className="guide-page" />
-          ))}
+          {GUIDE.map((b, i) => {
+            if (b.h) return <h3 key={i} className="guide-h">{b.h}</h3>;
+            if (b.motto) return <p key={i} className="guide-motto">{b.motto}</p>;
+            if (b.ul) return <ul key={i} className="guide-ul">{b.ul.map((li, j) => <li key={j}>{guideInline(li)}</li>)}</ul>;
+            return <p key={i} className="guide-p">{guideInline(b.p || '')}</p>;
+          })}
           <button className="btn outline" onClick={onClose}>Back to scoring</button>
         </div>
       </div>
