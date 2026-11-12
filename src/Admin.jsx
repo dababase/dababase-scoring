@@ -886,14 +886,13 @@ function Feedback({ code }) {
                   <div className="fb-label">{c.c} · top 5</div>
                   <div className="admin-table-wrap">
                     <table className="admin-table fb-mini">
-                      <thead><tr><th>Place</th><th>Entry</th><th>Avg</th><th>Judges</th></tr></thead>
+                      <thead><tr><th>Place</th><th>Entry</th><th>Avg</th></tr></thead>
                       <tbody>
                         {c.top.map((r) => (
                           <tr key={r.n}>
                             <td className="admin-rank">{placeLabel(r.rank, r.tied)}</td>
                             <td className="admin-name">{id(r.n)}</td>
                             <td className="admin-score">{r.avg.toFixed(1)}</td>
-                            <td>{r.judges}</td>
                           </tr>
                         ))}
                       </tbody>
