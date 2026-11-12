@@ -133,6 +133,11 @@ textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-si
 .fb-place b{font-size:24px;color:var(--amber);font-weight:400}
 .fb-place .fb-num{font-size:12px;color:var(--text)}
 .fb-table td{vertical-align:top}
+.fb-table{table-layout:fixed}
+.fb-table th:nth-child(1){width:130px}
+.fb-table th:nth-child(2){width:64px}
+.fb-table th:nth-child(3){width:72px}
+@media (max-width:560px){.fb-table th:nth-child(1){width:96px}.fb-table th:nth-child(2){width:52px}.fb-table th:nth-child(3){width:60px}}
 .fb-table td:last-child{min-width:220px}
 .fb-note{margin:2px 0 6px;color:var(--body);font-size:14px;line-height:1.4}
 .fb-general{margin-top:4px}
