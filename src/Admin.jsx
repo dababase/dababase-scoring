@@ -717,6 +717,7 @@ function Feedback({ code }) {
 
   const tracks = [...new Set(results.map((r) => r.track_name))];
   const sheets = [];
+  const summaries = [];
   tracks.forEach((t) => {
     const cats = [...new Map(raw.filter((r) => r.track_name === t).map((r) => [r.category, r.category_order])).entries()]
       .sort((a, b) => a[1] - b[1]).map(([c]) => c);
@@ -741,17 +742,54 @@ function Feedback({ code }) {
       if (per.length) overallAvg[n] = { avg: mean(per), judges: per.length };
     });
 
-    // Overall place: official rank points when counting submitted judges only;
-    // in Preview it's by plain average (rank points need every entry scored).
-    const official = {};
-    rankRows(results.filter((r) => r.track_name === t)).forEach((r) => { official[r.entry_number] = r; });
     const byAvg = rankBy(Object.entries(overallAvg).map(([n, o]) => ({ k: Number(n), v: o.avg })));
 
-    entryNums.forEach((n) => {
-      const o = official[n];
-      const place = preview
-        ? (byAvg.rank[n] ? { rank: byAvg.rank[n], tied: byAvg.tied(n), of: byAvg.n, how: 'by average' } : null)
-        : (o && o.rank != null ? { rank: o.rank, tied: o.tied, of: entryNums.length, how: `${Number(o.rank_points)} rank pts` } : null);
+    // Rank points. Not Preview: straight from admin_results (same numbers as
+    // the Results tab). Preview: the same rule worked out here over the
+    // counted judges — only judges who scored every entry rank; each ranks by
+    // their own avg (highest = 1), equal avgs ordered by their Experience
+    // score, equal on both split places; lowest total wins, ties → overall avg.
+    const pts = {};
+    let rankedJudges = 0;
+    if (!preview) {
+      results.filter((r) => r.track_name === t && r.rank_points != null).forEach((r) => { pts[r.entry_number] = Number(r.rank_points); rankedJudges = Math.max(rankedJudges, Number(r.ranked_judges)); });
+    } else {
+      const expCat = cats.find((c) => c.toLowerCase() === 'experience');
+      const jexp = {};
+      rows.filter((r) => r.track_name === t && r.category === expCat).forEach((r) => { jexp[`${r.entry_number}|${r.event_judge_id}`] = Number(r.raw_score); });
+      judgeIds.filter((j) => entryNums.every((n) => judgeAvg[`${n}|${j}`])).forEach((j) => {
+        rankedJudges++;
+        const list = entryNums.map((n) => ({ n, a: Number(mean(judgeAvg[`${n}|${j}`]).toFixed(6)), x: jexp[`${n}|${j}`] ?? -1 }))
+          .sort((p, q) => q.a - p.a || q.x - p.x);
+        for (let i = 0; i < list.length;) {
+          let k = i;
+          while (k + 1 < list.length && list[k + 1].a === list[i].a && list[k + 1].x === list[i].x) k++;
+          const share = (i + 1 + k + 1) / 2;
+          for (let m = i; m <= k; m++) pts[list[m].n] = (pts[list[m].n] || 0) + share;
+          i = k + 1;
+        }
+      });
+    }
+    const ranked = entryNums.filter((n) => pts[n] != null && overallAvg[n])
+      .sort((a, b) => pts[a] - pts[b] || overallAvg[b].avg - overallAvg[a].avg);
+    const rankPlace = {};
+    { let prev = null; let pr = 0; ranked.forEach((n, i) => { const k = pts[n].toFixed(2) + '|' + overallAvg[n].avg.toFixed(3); const r = k === prev ? pr : i + 1; prev = k; pr = r; rankPlace[n] = r; }); }
+    const rpCount = {}; Object.values(rankPlace).forEach((r) => { rpCount[r] = (rpCount[r] || 0) + 1; });
+    const range = (n) => { const per = judgeIds.map((j) => judgeAvg[`${n}|${j}`]).filter(Boolean).map(mean); return per.length ? [Math.min(...per), Math.max(...per)] : null; };
+
+    summaries.push({
+      track: t, rankedJudges, total: entryNums.length,
+      standings: [...ranked, ...entryNums.filter((n) => !ranked.includes(n))].map((n) => ({
+        n, place: rankPlace[n], tied: rpCount[rankPlace[n]] > 1, pts: pts[n], avgPlace: byAvg.rank[n], avgTied: byAvg.tied(n),
+        avg: overallAvg[n] ? overallAvg[n].avg : null, judges: overallAvg[n] ? overallAvg[n].judges : 0, range: range(n) })),
+      cats: cats.map((c) => ({ c, top: entryNums.filter((n) => catRanks[c].rank[n] && catRanks[c].rank[n] <= 5)
+        .sort((a, b) => catRanks[c].rank[a] - catRanks[c].rank[b] || a - b)
+        .map((n) => ({ n, rank: catRanks[c].rank[n], tied: catRanks[c].tied(n), avg: mean(cell[`${n}|${c}`]), judges: cell[`${n}|${c}`].length })) })),
+    });
+
+    // Sheets in standings order.
+    [...ranked, ...entryNums.filter((n) => !ranked.includes(n))].forEach((n) => {
+      const place = rankPlace[n] ? { rank: rankPlace[n], tied: rpCount[rankPlace[n]] > 1, of: entryNums.length, how: `${+pts[n].toFixed(1)} rank pts` } : null;
       const entryNotes = notes.filter((x) => x.track_name === t && x.entry_number === n && !x.excluded && (preview || x.submitted_at) && !isNumberOnly(x.note));
       sheets.push({
         track: t, n, place, overall: overallAvg[n], cats: cats.map((c) => {
@@ -803,7 +841,7 @@ function Feedback({ code }) {
         <button className="admin-link" onClick={exportFeedback}>Download feedback (CSV)</button>
       </div>
       {preview
-        ? <div className="admin-callout admin-noprint"><b>Preview — not final.</b> Counting {counted} judge{counted === 1 ? '' : 's'} including ones who haven't submitted, so entries have different numbers of judges and the overall place is by plain average. Untick Preview for the real thing: rank-point place from submitted judges only.</div>
+        ? <div className="admin-callout admin-noprint"><b>Preview — not final.</b> Counting {counted} judge{counted === 1 ? '' : 's'} including ones who haven't submitted, so entries have different numbers of judges, and rank points come only from judges who have scored every entry so far. Untick Preview for the real thing: submitted judges only, rank points exactly as on Results.</div>
         : <p className="muted-note admin-noprint">Counting {counted} submitted judge{counted === 1 ? '' : 's'}. Overall place = rank points (same as Results).</p>}
       {error && <div className="err admin-noprint">Refresh failed: {error}</div>}
       <p className="muted-note admin-noprint">Category rank is that entry's average in the category compared with every other entry ("=" means shared). Judges are anonymous ("Judge A" is the same person on every sheet) unless names are shown. Notes that are just a number are left out.</p>
@@ -813,6 +851,60 @@ function Feedback({ code }) {
         {logoUrl && <img src={logoUrl} alt="" />}
         <div className="fb-cover-title">{eventName}<span>{tracks.join(' · ')} · Entry feedback</span></div>
       </div>
+      {pick === 'all' && summaries.map((sm) => {
+        const id = (n) => {
+          const rv = reveal && reveal[`${sm.track}|${n}`];
+          const nm = showReveal && rv ? [rv.brand, rv.strain].filter(Boolean).join(' · ') : '';
+          return <>#{n}{nm ? <div className="admin-sub">{nm}</div> : <div className="admin-sub fb-tbd-sub">Company · Strain</div>}</>;
+        };
+        return (
+          <section key={'sum' + sm.track} className="fb-summary">
+            <h2 className="admin-h2">{multi ? sm.track + ' · ' : ''}Overall standings</h2>
+            <p className="muted-note">Place = rank points (each judge who scored every entry ranks them 1–{sm.total}; lowest total wins; ties go to the overall average). {sm.rankedJudges} judge{sm.rankedJudges === 1 ? '' : 's'} ranked. "Avg place" is the order by plain average. Range = lowest and highest judge's average for that entry.</p>
+            <div className="admin-table-wrap">
+              <table className="admin-table fb-standings">
+                <thead><tr><th>Place</th><th>Entry</th><th>Rank pts</th><th>Avg place</th><th>Avg</th><th>Range</th><th>Judges</th></tr></thead>
+                <tbody>
+                  {sm.standings.map((r) => (
+                    <tr key={r.n}>
+                      <td className="admin-rank">{r.place ? placeLabel(r.place, r.tied) : '—'}</td>
+                      <td className="admin-name">{id(r.n)}</td>
+                      <td className="admin-score">{r.pts != null ? +r.pts.toFixed(1) : '—'}</td>
+                      <td className="admin-rank">{r.avgPlace ? placeLabel(r.avgPlace, r.avgTied) : '—'}</td>
+                      <td className="admin-score">{r.avg != null ? r.avg.toFixed(1) : '—'}</td>
+                      <td className="fb-range">{r.range ? `${r.range[0].toFixed(1)} – ${r.range[1].toFixed(1)}` : '—'}</td>
+                      <td>{r.judges}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <h2 className="admin-h2">Category leaders</h2>
+            <div className="fb-cats">
+              {sm.cats.map((c) => (
+                <div key={c.c} className="fb-cat">
+                  <div className="fb-label">{c.c} · top 5</div>
+                  <div className="admin-table-wrap">
+                    <table className="admin-table fb-mini">
+                      <thead><tr><th>Place</th><th>Entry</th><th>Avg</th><th>Judges</th></tr></thead>
+                      <tbody>
+                        {c.top.map((r) => (
+                          <tr key={r.n}>
+                            <td className="admin-rank">{placeLabel(r.rank, r.tied)}</td>
+                            <td className="admin-name">{id(r.n)}</td>
+                            <td className="admin-score">{r.avg.toFixed(1)}</td>
+                            <td>{r.judges}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })}
       {shown.map((s) => {
         const rv = reveal && reveal[`${s.track}|${s.n}`];
         return (
