@@ -145,5 +145,7 @@ textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-si
   .fb-sheet *{color:#000!important;background:transparent!important;border-color:#ccc!important}
   .fb-sheet+.fb-sheet{break-before:page;page-break-before:always}
 }
+.fb-medal{font-size:1.35em;line-height:1}
+.fb-place .fb-medal{font-size:34px}
 .fb-logo{margin-bottom:12px}
 .fb-footer{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:20px;flex-wrap:wrap}

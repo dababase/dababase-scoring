@@ -649,6 +649,9 @@ function FeedbackFooter() {
   );
 }
 
+// 1st–3rd show as medals, like the judge app's live ranking.
+const MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' };
+const placeLabel = (n, tied) => <>{tied ? '=' : ''}{MEDAL[n] ? <span className="fb-medal">{MEDAL[n]}</span> : ordinal(n)}</>;
 const isNumberOnly = (s) => /^\s*[\d.,/]+\s*$/.test(s || '');
 
 // Rank by value, highest first; equal values (to 3 dp) share a rank.
@@ -815,7 +818,7 @@ function Feedback({ code }) {
                 {showReveal && rv && rv.strain && <div className="fb-strain">{rv.strain}{rv.brand ? <span> · {rv.brand}</span> : null}</div>}
               </div>
               <div className="fb-place">
-                {s.place ? <><b>{s.place.tied ? '=' : ''}{ordinal(s.place.rank)}</b><span>of {s.place.of} · {s.place.how}</span></> : <span>No placing yet</span>}
+                {s.place ? <><b>{placeLabel(s.place.rank, s.place.tied)}</b><span>of {s.place.of} · {s.place.how}</span></> : <span>No placing yet</span>}
                 {s.overall && <span>Overall avg <b className="fb-num">{s.overall.avg.toFixed(1)}</b> · {s.overall.judges} judge{s.overall.judges === 1 ? '' : 's'}</span>}
               </div>
             </div>
@@ -827,7 +830,7 @@ function Feedback({ code }) {
                     <tr key={c.c}>
                       <td className="admin-name">{c.c}</td>
                       <td className="admin-score">{c.avg == null ? '—' : c.avg.toFixed(1)}</td>
-                      <td className="admin-rank">{c.rank ? <>{c.tied ? '=' : ''}{ordinal(c.rank)}<div className="admin-sub">of {c.of}</div></> : '—'}</td>
+                      <td className="admin-rank">{c.rank ? <>{placeLabel(c.rank, c.tied)}<div className="admin-sub">of {c.of}</div></> : '—'}</td>
                       <td>{c.notes.length ? c.notes.map((x, i) => <div key={i} className="fb-note">“{x.note}” <span className="admin-sub">— {who(x.event_judge_id, x.judge)}</span></div>) : <span className="admin-sub">—</span>}</td>
                     </tr>
                   ))}
