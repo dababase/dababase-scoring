@@ -166,13 +166,14 @@ function Dashboard({ userEmail, onSignOut }) {
       {error && <div className="err">{error}</div>}
 
       <div className="sort-toggle admin-tabs">
-        {[['progress', 'Progress'], ['results', 'Results'], ['reveal', 'Reveal']].map(([k, label]) => (
+        {[['progress', 'Progress'], ['results', 'Results'], ['feedback', 'Feedback'], ['reveal', 'Reveal']].map(([k, label]) => (
           <button key={k} className={'sort-opt' + (tab === k ? ' active' : '')} onClick={() => setTab(k)}>{label}</button>
         ))}
       </div>
 
       {ev && tab === 'progress' && <Progress code={ev.event_code} key={'p' + ev.event_code} />}
       {ev && tab === 'results' && <Results code={ev.event_code} key={'r' + ev.event_code} />}
+      {ev && tab === 'feedback' && <Feedback code={ev.event_code} key={'f' + ev.event_code} />}
       {ev && tab === 'reveal' && <Reveal code={ev.event_code} key={'v' + ev.event_code} />}
     </div>
   );
@@ -623,6 +624,204 @@ function Reveal({ code }) {
           </tbody>
         </table>
       </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Feedback: one sheet per entry for the entrant — overall place, each
+// category's average and rank among all entries, and the judges' notes.
+// Uses the same judges as Results (submitted, not Test) unless "Preview" is on,
+// which also counts judges who haven't submitted, so the layout can be seen
+// before results day. Notes that are only a number ("97") are dropped.
+
+const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+const isNumberOnly = (s) => /^\s*[\d.,/]+\s*$/.test(s || '');
+
+// Rank by value, highest first; equal values (to 3 dp) share a rank.
+function rankBy(items) {
+  const sorted = [...items].sort((a, b) => b.v - a.v);
+  const out = {}; let prev = null; let prevRank = 0;
+  sorted.forEach((it, i) => {
+    const key = it.v.toFixed(3);
+    const r = key === prev ? prevRank : i + 1;
+    prev = key; prevRank = r;
+    out[it.k] = r;
+  });
+  const counts = {}; Object.values(out).forEach((r) => { counts[r] = (counts[r] || 0) + 1; });
+  return { rank: out, tied: (k) => counts[out[k]] > 1, n: sorted.length };
+}
+
+function Feedback({ code }) {
+  const { data, error, loadedAt, now, reload } = useLive(async () => {
+    const [res, raw, notes] = await Promise.all([
+      supabase.rpc('admin_results', { p_event_code: code }),
+      supabase.rpc('admin_score_rows', { p_event_code: code }),
+      supabase.rpc('admin_feedback_notes', { p_event_code: code }),
+    ]);
+    const e = res.error || raw.error || notes.error;
+    if (e) return { data: null, error: e };
+    return { data: { results: res.data || [], raw: raw.data || [], notes: notes.data || [] }, error: null };
+  }, [code]);
+  const [preview, setPreview] = useState(true);
+  const [names, setNames] = useState(false);
+  const [showReveal, setShowReveal] = useState(false);
+  const [reveal, setReveal] = useState(null);
+  const [pick, setPick] = useState('all');
+
+  useEffect(() => {
+    if (!showReveal || reveal) return;
+    supabase.rpc('admin_reveal', { p_event_code: code }).then(({ data: d }) => {
+      const m = {}; (d || []).forEach((r) => { m[`${r.track_name}|${r.entry_number}`] = r; }); setReveal(m);
+    });
+  }, [showReveal, code]);
+
+  if (!data || !data.results) return <div className="muted-note">{error || 'Loading…'}</div>;
+  const { results, raw, notes } = data;
+
+  const counts = (r) => !r.excluded && (preview || !!r.submitted_at);
+  const rows = raw.filter(counts);
+  const judgeIds = [...new Set(rows.map((r) => r.event_judge_id))];
+
+  // Stable anonymous labels: Judge A, B, … in order of judge name.
+  const judgeName = {}; raw.forEach((r) => { judgeName[r.event_judge_id] = r.judge; });
+  const label = {};
+  [...new Set([...raw, ...notes].map((r) => r.event_judge_id))]
+    .sort((a, b) => String(judgeName[a] || '').localeCompare(String(judgeName[b] || '')) || String(a).localeCompare(String(b)))
+    .forEach((id, i) => { label[id] = 'Judge ' + (i < 26 ? String.fromCharCode(65 + i) : i + 1); });
+  const who = (id, fallback) => (names ? (judgeName[id] || fallback || '(no name)') : label[id]);
+
+  const tracks = [...new Set(results.map((r) => r.track_name))];
+  const sheets = [];
+  tracks.forEach((t) => {
+    const cats = [...new Map(raw.filter((r) => r.track_name === t).map((r) => [r.category, r.category_order])).entries()]
+      .sort((a, b) => a[1] - b[1]).map(([c]) => c);
+    const entryNums = results.filter((r) => r.track_name === t).map((r) => r.entry_number).sort((a, b) => a - b);
+
+    // Per entry: per-category average, plus each judge's own average.
+    const cell = {}; const judgeAvg = {};
+    rows.filter((r) => r.track_name === t).forEach((r) => {
+      const k = `${r.entry_number}|${r.category}`;
+      (cell[k] = cell[k] || []).push(Number(r.raw_score));
+      const jk = `${r.entry_number}|${r.event_judge_id}`;
+      (judgeAvg[jk] = judgeAvg[jk] || []).push(Number(r.raw_score));
+    });
+    const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    const catRanks = {};
+    cats.forEach((c) => {
+      catRanks[c] = rankBy(entryNums.filter((n) => cell[`${n}|${c}`]).map((n) => ({ k: n, v: mean(cell[`${n}|${c}`]) })));
+    });
+    const overallAvg = {};
+    entryNums.forEach((n) => {
+      const per = judgeIds.map((j) => judgeAvg[`${n}|${j}`]).filter(Boolean).map(mean);
+      if (per.length) overallAvg[n] = { avg: mean(per), judges: per.length };
+    });
+
+    // Overall place: official rank points when counting submitted judges only;
+    // in Preview it's by plain average (rank points need every entry scored).
+    const official = {};
+    rankRows(results.filter((r) => r.track_name === t)).forEach((r) => { official[r.entry_number] = r; });
+    const byAvg = rankBy(Object.entries(overallAvg).map(([n, o]) => ({ k: Number(n), v: o.avg })));
+
+    entryNums.forEach((n) => {
+      const o = official[n];
+      const place = preview
+        ? (byAvg.rank[n] ? { rank: byAvg.rank[n], tied: byAvg.tied(n), of: byAvg.n, how: 'by average' } : null)
+        : (o && o.rank != null ? { rank: o.rank, tied: o.tied, of: entryNums.length, how: `${Number(o.rank_points)} rank pts` } : null);
+      const entryNotes = notes.filter((x) => x.track_name === t && x.entry_number === n && !x.excluded && (preview || x.submitted_at) && !isNumberOnly(x.note));
+      sheets.push({
+        track: t, n, place, overall: overallAvg[n], cats: cats.map((c) => {
+          const xs = cell[`${n}|${c}`];
+          return { c, avg: xs ? mean(xs) : null, judges: xs ? xs.length : 0, rank: catRanks[c].rank[n], tied: catRanks[c].tied(n), of: catRanks[c].n,
+            notes: entryNotes.filter((x) => x.category === c) };
+        }),
+        general: entryNotes.filter((x) => x.category == null),
+      });
+    });
+  });
+
+  const shown = sheets.filter((s) => pick === 'all' || `${s.track}|${s.n}` === pick);
+  const multi = tracks.length > 1;
+
+  function exportFeedback() {
+    const out = [['track', 'entry', 'strain', 'brand', 'overall_place', 'overall_avg', 'section', 'category_avg', 'category_rank', 'judge', 'note']];
+    sheets.forEach((s) => {
+      const rv = reveal && reveal[`${s.track}|${s.n}`];
+      const base = [s.track, s.n, showReveal && rv ? rv.strain : '', showReveal && rv ? rv.brand : '',
+        s.place ? (s.place.tied ? '=' : '') + s.place.rank : '', s.overall ? s.overall.avg.toFixed(2) : ''];
+      s.cats.forEach((c) => {
+        const rk = c.rank ? (c.tied ? '=' : '') + c.rank + ' of ' + c.of : '';
+        if (!c.notes.length) out.push([...base, c.c, c.avg == null ? '' : c.avg.toFixed(2), rk, '', '']);
+        c.notes.forEach((x) => out.push([...base, c.c, c.avg == null ? '' : c.avg.toFixed(2), rk, who(x.event_judge_id, x.judge), x.note]));
+      });
+      s.general.forEach((x) => out.push([...base, 'General', '', '', who(x.event_judge_id, x.judge), x.note]));
+    });
+    downloadCsv(`${code}-entry-feedback.csv`, out);
+  }
+
+  const counted = judgeIds.length;
+  return (
+    <>
+      <div className="admin-meta admin-noprint">
+        <label className="admin-check"><input type="checkbox" checked={preview} onChange={(e) => setPreview(e.target.checked)} /> Preview: include judges who haven't submitted</label>
+        <label className="admin-check"><input type="checkbox" checked={names} onChange={(e) => setNames(e.target.checked)} /> Show judge names</label>
+        <label className="admin-check"><input type="checkbox" checked={showReveal} onChange={(e) => setShowReveal(e.target.checked)} /> Show strain</label>
+        <span>updated {ago(loadedAt, now)}</span>
+        <button className="admin-link" onClick={reload}>Refresh now</button>
+      </div>
+      <div className="admin-picker admin-noprint">
+        <label htmlFor="fb-entry">Entry</label>
+        <select id="fb-entry" value={pick} onChange={(e) => setPick(e.target.value)}>
+          <option value="all">All entries ({sheets.length})</option>
+          {sheets.map((s) => <option key={s.track + s.n} value={`${s.track}|${s.n}`}>{multi ? s.track + ' · ' : ''}Entry #{s.n}</option>)}
+        </select>
+        <button className="admin-link" onClick={() => window.print()}>Print / save as PDF</button>
+        <button className="admin-link" onClick={exportFeedback}>Download feedback (CSV)</button>
+      </div>
+      {preview
+        ? <div className="admin-callout admin-noprint"><b>Preview — not final.</b> Counting {counted} judge{counted === 1 ? '' : 's'} including ones who haven't submitted, so entries have different numbers of judges and the overall place is by plain average. Untick Preview for the real thing: rank-point place from submitted judges only.</div>
+        : <p className="muted-note admin-noprint">Counting {counted} submitted judge{counted === 1 ? '' : 's'}. Overall place = rank points (same as Results).</p>}
+      {error && <div className="err admin-noprint">Refresh failed: {error}</div>}
+      <p className="muted-note admin-noprint">Category rank is that entry's average in the category compared with every other entry ("=" means shared). Judges are anonymous ("Judge A" is the same person on every sheet) unless names are shown. Notes that are just a number are left out.</p>
+
+      {shown.map((s) => {
+        const rv = reveal && reveal[`${s.track}|${s.n}`];
+        return (
+          <section key={s.track + s.n} className="fb-sheet">
+            <div className="fb-head">
+              <div>
+                <div className="eyebrow">{multi ? s.track + ' · ' : ''}Entry #{s.n}</div>
+                {showReveal && rv && rv.strain && <div className="fb-strain">{rv.strain}{rv.brand ? <span> · {rv.brand}</span> : null}</div>}
+              </div>
+              <div className="fb-place">
+                {s.place ? <><b>{s.place.tied ? '=' : ''}{ordinal(s.place.rank)}</b><span>of {s.place.of} · {s.place.how}</span></> : <span>No placing yet</span>}
+                {s.overall && <span>Overall avg <b className="fb-num">{s.overall.avg.toFixed(1)}</b> · {s.overall.judges} judge{s.overall.judges === 1 ? '' : 's'}</span>}
+              </div>
+            </div>
+            <div className="admin-table-wrap">
+              <table className="admin-table fb-table">
+                <thead><tr><th>Category</th><th>Avg</th><th>Rank</th><th>Judges' notes</th></tr></thead>
+                <tbody>
+                  {s.cats.map((c) => (
+                    <tr key={c.c}>
+                      <td className="admin-name">{c.c}</td>
+                      <td className="admin-score">{c.avg == null ? '—' : c.avg.toFixed(1)}</td>
+                      <td className="admin-rank">{c.rank ? <>{c.tied ? '=' : ''}{ordinal(c.rank)}<div className="admin-sub">of {c.of}</div></> : '—'}</td>
+                      <td>{c.notes.length ? c.notes.map((x, i) => <div key={i} className="fb-note">“{x.note}” <span className="admin-sub">— {who(x.event_judge_id, x.judge)}</span></div>) : <span className="admin-sub">—</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {s.general.length > 0 && (
+              <div className="fb-general">
+                <div className="fb-label">General notes</div>
+                {s.general.map((x, i) => <div key={i} className="fb-note">“{x.note}” <span className="admin-sub">— {who(x.event_judge_id, x.judge)}</span></div>)}
+              </div>
+            )}
+          </section>
+        );
+      })}
     </>
   );
 }
