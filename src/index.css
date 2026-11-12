@@ -175,7 +175,6 @@ textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-si
 .fb-standings th:nth-child(4){width:78px}
 .fb-standings th:nth-child(5){width:70px}
 .fb-standings th:nth-child(6){width:110px}
-.fb-standings th:nth-child(7){width:64px}
 .fb-standings td,.fb-mini td{padding:6px 12px}
 .fb-range{font-family:'Space Mono',monospace;font-size:13px;color:var(--muted);white-space:nowrap}
 .fb-tbd-sub{font-style:italic}
@@ -184,6 +183,6 @@ textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-si
 .fb-mini{table-layout:fixed}
 .fb-mini th:nth-child(1){width:62px}
 .fb-mini th:nth-child(3){width:64px}
-@media (max-width:560px){.fb-standings th:nth-child(4),.fb-standings td:nth-child(4),.fb-standings th:nth-child(7),.fb-standings td:nth-child(7){display:none}}
+@media (max-width:560px){.fb-standings th:nth-child(4),.fb-standings td:nth-child(4){display:none}}
 .fb-logo{margin-bottom:12px}
 .fb-footer{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;flex-wrap:wrap;opacity:.85}

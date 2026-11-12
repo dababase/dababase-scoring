@@ -849,7 +849,7 @@ function Feedback({ code }) {
       {/* Logo + event name once, at the top (top of the first printed page). */}
       <div className="fb-cover">
         {logoUrl && <img src={logoUrl} alt="" />}
-        <div className="fb-cover-title">{eventName}<span>{tracks.join(' · ')} · Entry feedback</span></div>
+        <div className="fb-cover-title">{eventName}<span>{tracks.join(' · ')} · Entry feedback · {summaries.map((x) => x.total).join(' / ')} entries · {counted} judges</span></div>
       </div>
       {pick === 'all' && summaries.map((sm) => {
         const id = (n) => {
@@ -863,7 +863,7 @@ function Feedback({ code }) {
             <p className="muted-note">Place = rank points (each judge who scored every entry ranks them 1–{sm.total}; lowest total wins; ties go to the overall average). {sm.rankedJudges} judge{sm.rankedJudges === 1 ? '' : 's'} ranked. "Avg place" is the order by plain average. Range = lowest and highest judge's average for that entry.</p>
             <div className="admin-table-wrap">
               <table className="admin-table fb-standings">
-                <thead><tr><th>Place</th><th>Entry</th><th>Rank pts</th><th>Avg place</th><th>Avg</th><th>Range</th><th>Judges</th></tr></thead>
+                <thead><tr><th>Place</th><th>Entry</th><th>Rank pts</th><th>Avg place</th><th>Avg</th><th>Range</th></tr></thead>
                 <tbody>
                   {sm.standings.map((r) => (
                     <tr key={r.n}>
@@ -873,7 +873,6 @@ function Feedback({ code }) {
                       <td className="admin-rank">{r.avgPlace ? placeLabel(r.avgPlace, r.avgTied) : '—'}</td>
                       <td className="admin-score">{r.avg != null ? r.avg.toFixed(1) : '—'}</td>
                       <td className="fb-range">{r.range ? `${r.range[0].toFixed(1)} – ${r.range[1].toFixed(1)}` : '—'}</td>
-                      <td>{r.judges}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -917,7 +916,7 @@ function Feedback({ code }) {
               </div>
               <div className="fb-place">
                 {s.place ? <div className="fb-placeline"><b>{placeLabel(s.place.rank, s.place.tied)}</b><span>of {s.place.of} · {s.place.how}</span></div> : <span>No placing yet</span>}
-                {s.overall && <span>Overall avg <b className="fb-num">{s.overall.avg.toFixed(1)}</b> · {s.overall.judges} judge{s.overall.judges === 1 ? '' : 's'}</span>}
+                {s.overall && <span>Overall avg <b className="fb-num">{s.overall.avg.toFixed(1)}</b></span>}
               </div>
             </div>
             <div className="admin-table-wrap">
