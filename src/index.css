@@ -147,5 +147,6 @@ textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-si
 }
 .fb-medal{font-size:1.35em;line-height:1}
 .fb-place .fb-medal{font-size:34px}
+.admin-rank .fb-rankbox{display:inline-block;width:4ch;text-align:center}
 .fb-logo{margin-bottom:12px}
 .fb-footer{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:20px;flex-wrap:wrap}

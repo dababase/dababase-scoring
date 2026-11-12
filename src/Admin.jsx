@@ -651,7 +651,7 @@ function FeedbackFooter() {
 
 // 1st–3rd show as medals, like the judge app's live ranking.
 const MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' };
-const placeLabel = (n, tied) => <>{tied ? '=' : ''}{MEDAL[n] ? <span className="fb-medal">{MEDAL[n]}</span> : ordinal(n)}</>;
+const placeLabel = (n, tied) => <>{tied ? '=' : ''}{MEDAL[n] ? <span className="fb-rankbox"><span className="fb-medal">{MEDAL[n]}</span></span> : ordinal(n)}</>;
 const isNumberOnly = (s) => /^\s*[\d.,/]+\s*$/.test(s || '');
 
 // Rank by value, highest first; equal values (to 3 dp) share a rank.
@@ -839,7 +839,7 @@ function Feedback({ code }) {
             </div>
             {s.general.length > 0 && (
               <div className="fb-general">
-                <div className="fb-label">General notes</div>
+                <div className="fb-label">Overall notes</div>
                 {s.general.map((x, i) => <div key={i} className="fb-note">“{x.note}” <span className="admin-sub">— {who(x.event_judge_id, x.judge)}</span></div>)}
               </div>
             )}
