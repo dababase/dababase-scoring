@@ -638,11 +638,12 @@ function Reveal({ code }) {
 const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
 // Same sponsor row as the judge app's SponsorFooter (App.jsx), copied so the
 // judge-facing file stays untouched.
-function FeedbackFooter() {
+function FeedbackFooter({ track }) {
   return (
     <div className="fb-footer">
       <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '14px', width: 'auto', borderRadius: '5px' }} />
       <img src="/events/TerpIsle26/fire-farms.webp" alt="Fire Farms Maui" style={{ height: '26px', width: '26px', borderRadius: '50%' }} />
+      {String(track).toLowerCase() === 'rosin' && <img src="/events/TerpIsle26/rosin-evolution.webp" alt="Rosin Evolution" style={{ height: '26px', width: 'auto' }} />}
       <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '26px', width: 'auto', borderRadius: '6px' }} />
       <img src="/events/TerpIsle26/high-times.webp" alt="High Times" style={{ height: '16px', width: 'auto', borderRadius: '5px' }} />
     </div>
@@ -940,7 +941,7 @@ function Feedback({ code }) {
                 {s.general.map((x, i) => <div key={i} className="fb-note">“{x.note}” <span className="admin-sub">— {who(x.event_judge_id, x.judge)}</span></div>)}
               </div>
             )}
-            <FeedbackFooter />
+            <FeedbackFooter track={s.track} />
           </section>
         );
       })}
