@@ -354,6 +354,16 @@ function Results({ code }) {
   const incomplete = Object.values(byJudge).filter((j) => !j.excluded && (!j.submitted || j.n < (totalCells[j.track] || 0)))
     .sort((a, b) => b.n - a.n);
 
+  // A judge gave entries the same average AND the same Experience score, so
+  // neither tie-breaker separates them; they split places. Flag for Nick.
+  const stillTied = {};
+  results.forEach((r) => (r.judge_scores || []).forEach((j) => {
+    if (j.tie !== 'still_tied') return;
+    const k = `${r.track_name}|${j.ej}|${j.avg}|${j.exp}`;
+    (stillTied[k] = stillTied[k] || { track: r.track_name, judge: j.judge, avg: j.avg, exp: j.exp, pts: j.pts, entries: [] }).entries.push(r.entry_number);
+  }));
+  const stillTiedList = Object.values(stillTied).sort((a, b) => String(a.judge).localeCompare(String(b.judge)) || Number(a.pts) - Number(b.pts));
+
   function exportRaw() {
     const rows = [['judge', 'email', 'submitted', 'test', 'track', 'entry', 'category', 'score']];
     raw.forEach((r) => rows.push([r.judge, r.email, r.submitted_at ? 'yes' : 'no', r.excluded ? 'yes' : 'no', r.track_name, r.entry_number, r.category, r.raw_score]));
@@ -424,7 +434,17 @@ function Results({ code }) {
           <span className="admin-sub">Their scores are in "Download every score" (submitted = no). Mark a judge Test on Progress to drop them from this list.</span>
         </div>
       )}
-      <p className="muted-note">Overall placing uses rank points: each judge ranks every entry by their own average across categories (highest = 1 point, lowest = {results.filter((r) => r.track_name === tracks[0]).length} points; identical scores split the places), points are added up, and the lowest total wins. Only judges who scored every entry rank. Equal points are broken by Avg, the plain average across judges; only if both match do entries share a rank (marked =). Category columns are the plain average of counted judges' scores in that category. Spread is the standard deviation of judge averages; highlighted when more than 1.5× the event's median.</p>
+      {stillTiedList.length > 0 && (
+        <div className="admin-callout">
+          <b>{stillTiedList.length} tie{stillTiedList.length === 1 ? '' : 's'} inside a judge's ranking that Experience couldn't break — check with the organizer</b>
+          <ul>
+            {stillTiedList.map((g, i) => (
+              <li key={i}>{tracks.length > 1 ? `${g.track} · ` : ''}{g.judge}: entries {g.entries.sort((a, b) => a - b).map((n) => '#' + n).join(', ')} all averaged {g.avg} with Experience {g.exp ?? '—'} → {Number(g.pts)} pts each</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="muted-note">Overall placing uses rank points: each judge ranks every entry by their own average across categories (highest = 1 point, lowest = {results.filter((r) => r.track_name === tracks[0]).length} points; if a judge gives entries the same average, their Experience score decides, and only if that matches too do they split the places), points are added up, and the lowest total wins. Only judges who scored every entry rank. Equal points are broken by Avg, the plain average across judges; only if both match do entries share a rank (marked =). Category columns are the plain average of counted judges' scores in that category. Spread is the standard deviation of judge averages; highlighted when more than 1.5× the event's median.</p>
       {error && <div className="err">Refresh failed: {error}</div>}
       {compare && tracks.map((t) => {
         const withRank = rankRows(results.filter((r) => r.track_name === t));
@@ -502,7 +522,7 @@ function Results({ code }) {
                           <tr className="admin-detail">
                             <td colSpan={cols}>
                               {r.judge_scores.length ? r.judge_scores.map((j, i) => (
-                                <span key={i} className="admin-chip">{j.judge}: <b>{j.avg}</b>{j.pts != null && <> · {Number(j.pts)} pt{Number(j.pts) === 1 ? '' : 's'}</>}</span>
+                                <span key={i} className="admin-chip">{j.judge}: <b>{j.avg}</b>{j.pts != null && <> · {Number(j.pts)} pt{Number(j.pts) === 1 ? '' : 's'}</>}{j.tie === 'experience' && <> · <i>tie broken by Experience ({j.exp})</i></>}{j.tie === 'still_tied' && <> · <b className="admin-warn">still tied (Experience {j.exp})</b></>}</span>
                               )) : <span className="admin-sub">No submitted scores yet.</span>}
                             </td>
                           </tr>
