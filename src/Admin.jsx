@@ -641,10 +641,10 @@ const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return
 function FeedbackFooter() {
   return (
     <div className="fb-footer">
-      <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '23.5px', width: 'auto', borderRadius: '8px' }} />
-      <img src="/events/TerpIsle26/fire-farms.webp" alt="Fire Farms Maui" style={{ height: '44px', width: '44px', borderRadius: '50%' }} />
-      <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '44px', width: 'auto', borderRadius: '10px' }} />
-      <img src="/events/TerpIsle26/high-times.webp" alt="High Times" style={{ height: '27px', width: 'auto', borderRadius: '8px' }} />
+      <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '14px', width: 'auto', borderRadius: '5px' }} />
+      <img src="/events/TerpIsle26/fire-farms.webp" alt="Fire Farms Maui" style={{ height: '26px', width: '26px', borderRadius: '50%' }} />
+      <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '26px', width: 'auto', borderRadius: '6px' }} />
+      <img src="/events/TerpIsle26/high-times.webp" alt="High Times" style={{ height: '16px', width: 'auto', borderRadius: '5px' }} />
     </div>
   );
 }
