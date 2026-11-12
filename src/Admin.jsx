@@ -645,7 +645,7 @@ function FeedbackFooter({ track }) {
       <img src="/events/TerpIsle26/fire-farms.webp" alt="Fire Farms Maui" style={{ height: '26px', width: '26px', borderRadius: '50%' }} />
       {String(track).toLowerCase() === 'rosin' && <img src="/events/TerpIsle26/rosin-evolution.webp" alt="Rosin Evolution" style={{ height: '26px', width: 'auto' }} />}
       <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '26px', width: 'auto', borderRadius: '6px' }} />
-      <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '14px', width: 'auto', borderRadius: '5px' }} />
+      <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '14px', width: 'auto', borderRadius: '5px', transform: 'translateY(3px)' }} />
     </div>
   );
 }
