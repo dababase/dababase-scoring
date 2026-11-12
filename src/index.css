@@ -127,7 +127,7 @@ textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-si
 .fb-sheet{border:1px solid var(--inactive);border-radius:14px;padding:16px;margin:16px 0;background:#0c0c0c;break-inside:avoid;page-break-inside:avoid}
 .fb-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .fb-head .eyebrow{margin:0}
-.fb-strain{font-family:'Playfair Display',serif;font-size:20px;color:var(--text);margin-top:4px}
+.fb-strain{font-family:'Playfair Display',serif;font-size:20px;color:var(--text);line-height:1.2}
 .fb-strain span{font-size:14px;color:var(--muted);font-family:inherit}
 .fb-place{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:12px;color:var(--muted);font-family:'Space Mono',monospace}
 .fb-place b{font-size:24px;color:var(--amber);font-weight:400}
@@ -140,6 +140,7 @@ textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-si
 @media (max-width:560px){.fb-place{align-items:flex-start}}
 @media print{
   body{background:#fff!important}
+  .fb-cover-title,.fb-cover-title span{color:#000!important}
   .admin-noprint,.admin-top,.admin-tabs,.admin-picker,.admin-wrap>h1{display:none!important}
   .fb-sheet{background:#fff;border-color:#ccc;color:#000;margin:0 0 16px}
   .fb-sheet *{color:#000!important;background:transparent!important;border-color:#ccc!important}
@@ -148,5 +149,17 @@ textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-si
 .fb-medal{font-size:1.35em;line-height:1}
 .fb-place .fb-medal{font-size:34px}
 .admin-rank .fb-rankbox{display:inline-block;width:4ch;text-align:center}
+.fb-cover{display:flex;align-items:center;gap:16px;margin:4px 0 8px}
+.fb-cover img{width:84px;height:84px;object-fit:contain;border-radius:12px}
+.fb-cover-title{font-family:'Playfair Display',serif;font-size:22px;color:var(--text);display:flex;flex-direction:column;gap:2px}
+.fb-cover-title span{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber)}
+.fb-sheet{padding:12px 14px}
+.fb-head{align-items:center;margin-bottom:10px}
+.fb-id .eyebrow{margin:0 0 2px}
+.fb-tbd{color:var(--faint);font-style:italic}
+.fb-place{gap:0}
+.fb-placeline{display:flex;align-items:baseline;gap:8px}
+.fb-placeline b{font-size:26px;line-height:1.1}
+.fb-place .fb-placeline .fb-medal{font-size:28px}
 .fb-logo{margin-bottom:12px}
 .fb-footer{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:20px;flex-wrap:wrap}

@@ -685,11 +685,12 @@ function Feedback({ code }) {
   const [reveal, setReveal] = useState(null);
   const [pick, setPick] = useState('all');
   const [logoUrl, setLogoUrl] = useState(null);
+  const [eventName, setEventName] = useState('');
 
   // Header logo from the event's own theme, as the judge app does.
   useEffect(() => {
-    supabase.from('events').select('theme').ilike('event_code', code).maybeSingle()
-      .then(({ data: d }) => setLogoUrl((d && d.theme && d.theme.logo_url) || null));
+    supabase.from('events').select('name, theme').ilike('event_code', code).maybeSingle()
+      .then(({ data: d }) => { setLogoUrl((d && d.theme && d.theme.logo_url) || null); setEventName((d && d.name) || ''); });
   }, [code]);
 
   useEffect(() => {
@@ -807,18 +808,24 @@ function Feedback({ code }) {
       {error && <div className="err admin-noprint">Refresh failed: {error}</div>}
       <p className="muted-note admin-noprint">Category rank is that entry's average in the category compared with every other entry ("=" means shared). Judges are anonymous ("Judge A" is the same person on every sheet) unless names are shown. Notes that are just a number are left out.</p>
 
+      {/* Logo + event name once, at the top (top of the first printed page). */}
+      <div className="fb-cover">
+        {logoUrl && <img src={logoUrl} alt="" />}
+        <div className="fb-cover-title">{eventName}<span>{tracks.join(' · ')} · Entry feedback</span></div>
+      </div>
       {shown.map((s) => {
         const rv = reveal && reveal[`${s.track}|${s.n}`];
         return (
           <section key={s.track + s.n} className="fb-sheet">
-            {logoUrl && <div className="logo-header fb-logo"><img src={logoUrl} alt="" className="logo-header-img" /></div>}
             <div className="fb-head">
-              <div>
-                <div className="eyebrow">{multi ? s.track + ' · ' : ''}Entry #{s.n}</div>
-                {showReveal && rv && rv.strain && <div className="fb-strain">{rv.strain}{rv.brand ? <span> · {rv.brand}</span> : null}</div>}
+              <div className="fb-id">
+                <div className="eyebrow">{s.track} · Entry #{s.n}</div>
+                {showReveal && rv && (rv.brand || rv.strain)
+                  ? <div className="fb-strain">{[rv.brand, rv.strain].filter(Boolean).join(' · ')}</div>
+                  : <div className="fb-strain fb-tbd">Company · Strain</div>}
               </div>
               <div className="fb-place">
-                {s.place ? <><b>{placeLabel(s.place.rank, s.place.tied)}</b><span>of {s.place.of} · {s.place.how}</span></> : <span>No placing yet</span>}
+                {s.place ? <div className="fb-placeline"><b>{placeLabel(s.place.rank, s.place.tied)}</b><span>of {s.place.of} · {s.place.how}</span></div> : <span>No placing yet</span>}
                 {s.overall && <span>Overall avg <b className="fb-num">{s.overall.avg.toFixed(1)}</b> · {s.overall.judges} judge{s.overall.judges === 1 ? '' : 's'}</span>}
               </div>
             </div>
