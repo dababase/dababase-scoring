@@ -636,6 +636,19 @@ function Reveal({ code }) {
 // before results day. Notes that are only a number ("97") are dropped.
 
 const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+// Same sponsor row as the judge app's SponsorFooter (App.jsx), copied so the
+// judge-facing file stays untouched.
+function FeedbackFooter() {
+  return (
+    <div className="fb-footer">
+      <img src="/events/TerpIsle26/dababase-logo.webp" alt="dababase" style={{ height: '23.5px', width: 'auto', borderRadius: '8px' }} />
+      <img src="/events/TerpIsle26/fire-farms.webp" alt="Fire Farms Maui" style={{ height: '44px', width: '44px', borderRadius: '50%' }} />
+      <img src="/events/TerpIsle26/logo.webp" alt="" style={{ height: '44px', width: 'auto', borderRadius: '10px' }} />
+      <img src="/events/TerpIsle26/high-times.webp" alt="High Times" style={{ height: '27px', width: 'auto', borderRadius: '8px' }} />
+    </div>
+  );
+}
+
 const isNumberOnly = (s) => /^\s*[\d.,/]+\s*$/.test(s || '');
 
 // Rank by value, highest first; equal values (to 3 dp) share a rank.
@@ -668,6 +681,13 @@ function Feedback({ code }) {
   const [showReveal, setShowReveal] = useState(false);
   const [reveal, setReveal] = useState(null);
   const [pick, setPick] = useState('all');
+  const [logoUrl, setLogoUrl] = useState(null);
+
+  // Header logo from the event's own theme, as the judge app does.
+  useEffect(() => {
+    supabase.from('events').select('theme').ilike('event_code', code).maybeSingle()
+      .then(({ data: d }) => setLogoUrl((d && d.theme && d.theme.logo_url) || null));
+  }, [code]);
 
   useEffect(() => {
     if (!showReveal || reveal) return;
@@ -788,6 +808,7 @@ function Feedback({ code }) {
         const rv = reveal && reveal[`${s.track}|${s.n}`];
         return (
           <section key={s.track + s.n} className="fb-sheet">
+            {logoUrl && <div className="logo-header fb-logo"><img src={logoUrl} alt="" className="logo-header-img" /></div>}
             <div className="fb-head">
               <div>
                 <div className="eyebrow">{multi ? s.track + ' · ' : ''}Entry #{s.n}</div>
@@ -819,6 +840,7 @@ function Feedback({ code }) {
                 {s.general.map((x, i) => <div key={i} className="fb-note">“{x.note}” <span className="admin-sub">— {who(x.event_judge_id, x.judge)}</span></div>)}
               </div>
             )}
+            <FeedbackFooter />
           </section>
         );
       })}
