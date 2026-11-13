@@ -184,5 +184,6 @@ textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-si
 .fb-mini th:nth-child(1){width:62px}
 .fb-mini th:nth-child(3){width:64px}
 @media (max-width:560px){.fb-standings th:nth-child(4),.fb-standings td:nth-child(4){display:none}}
+.fb-facts{margin:-2px 0 10px;font-size:14px;line-height:1.45;color:var(--body);font-style:italic}
 .fb-logo{margin-bottom:12px}
 .fb-footer{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;flex-wrap:wrap;opacity:.85}

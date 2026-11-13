@@ -653,6 +653,27 @@ function FeedbackFooter({ track }) {
 // 1st–3rd show as medals, like the judge app's live ranking.
 const MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' };
 const placeLabel = (n, tied) => <>{tied ? '=' : ''}{MEDAL[n] ? <span className="fb-rankbox"><span className="fb-medal">{MEDAL[n]}</span></span> : ordinal(n)}</>;
+// ---- Fun facts: 1–2 sentences per entry, picked from the data (keyword
+// matching on notes is rough, so read them over before sending).
+const FACT_FLAVORS = [['papaya', /papaya|papayanana|bananapaya|banapapaya|bananapayay/], ['banana', /banana/], ['pineapple', /pineapple|pineapply/], ['gas', /\bgas|gassy\b/],
+  ['citrus', /citrus/], ['lemon', /lemon/], ['lime', /\blime|limey/], ['orange', /orange/], ['cherry', /cherr/], ['grape', /grape|grapy/], ['watermelon', /watermelon/],
+  ['berry', /berry|berries/], ['floral', /floral/], ['pine', /\bpine\b|piney/], ['skunk', /skunk/], ['candy', /candy/], ['honey', /honey|nectar/], ['caramel', /caramel|carmel|butterscotch/],
+  ['mint', /mint|menthol/], ['Z / Zushi', /zushi|\bz\b|zkittles/], ['OG', /\bog\b/], ['haze', /haze|hazy/], ['peach', /peach/], ['tropical', /tropical|tropic|troppy/],
+  ['planty / grassy', /planty|plant|grassy|vegetative/], ['earthy', /earth/], ['spice', /spic|pepper/]];
+const FACT_THEMES = [['a clean melt', /clean melt|melt(ed)? (super )?(clear|clean|light)|melts like water|water like|qtip (was |looks? )?(good|clean)|no visible particulate|burn(ed)? (nice and )?clean/],
+  ['harshness on the throat', /harsh|throat|tickle|scratch|irritat|cough/],
+  ['how smooth it was', /smooth/],
+  ['that the aroma was muted or could be louder', /muted|could be (a bit )?louder|not (super )?loud|faint|almost no smell/],
+  ['a light color', /light (colou?r|tan|yellow|honey|parchment|butter)|almost white|light colou?red|primarily white|neon/],
+  ['that the flavor didn’t carry over from the smell', /translat|transfer|not like how it smells|not what (it|is) smelled|didn.t (smell or )?taste/],
+  ['a dry texture', /\bdry|dryer|cakey/],
+  ['a wet, terpy consistency', /\bwet|terpy|greasy|badder|soupy/],
+  ['strong effects', /slap|potent|stoned|stuck|strong high|super high|impactful|smack/],
+  ['relaxing effects', /relax|mellow|chill|laid me down/]];
+const fmt1 = (x) => +x.toFixed(1);
+const listAnd = (xs) => (xs.length <= 1 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
+const numWordCap = (k) => { const w = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'][k] || String(k); return w[0].toUpperCase() + w.slice(1); };
+
 const isNumberOnly = (s) => /^\s*[\d.,/]+\s*$/.test(s || '');
 
 // Rank by value, highest first; equal values (to 3 dp) share a rank.
@@ -778,6 +799,47 @@ function Feedback({ code }) {
     const rpCount = {}; Object.values(rankPlace).forEach((r) => { rpCount[r] = (rpCount[r] || 0) + 1; });
     const range = (n) => { const per = judgeIds.map((j) => judgeAvg[`${n}|${j}`]).filter(Boolean).map(mean); return per.length ? [Math.min(...per), Math.max(...per)] : null; };
 
+    // Event-wide reference points for the fun facts.
+    const javs = (n) => judgeIds.map((j) => judgeAvg[`${n}|${j}`]).filter(Boolean).map(mean);
+    let topSingle = { v: -1 };
+    entryNums.forEach((n) => javs(n).forEach((v) => { if (v > topSingle.v) topSingle = { n, v }; }));
+    // judge averages under 11 are someone scoring 1–10 on a 1–100 form; ignore for spread facts
+    const spreads = entryNums.map((n) => { const v = javs(n).filter((x) => x >= 11); return v.length >= 3 ? { n, s: Math.max(...v) - Math.min(...v), lo: Math.min(...v), hi: Math.max(...v) } : null; }).filter(Boolean);
+    const widest = spreads.reduce((a, b) => (b.s > a.s ? b : a), { s: -1 });
+    const tightest = spreads.reduce((a, b) => (b.s < a.s ? b : a), { s: 1e9 });
+    const factsFor = (n, entryNotes) => {
+      const o = overallAvg[n]; if (!o) return '';
+      const f = []; const rp = rankPlace[n]; const ap = byAvg.rank[n];
+      const golds = cats.filter((c) => catRanks[c].rank[n] === 1);
+      if (rp === 1 && ap === 1) f.push([100, 'Leads both the rank-points standings and the plain average' + (golds.length ? '' : ', without finishing first in a single category') + '.']);
+      else if (rp === 1) f.push([100, `Leads on rank points even though it's ${ordinal(ap)} on plain average` + (golds.length ? '.' : ', and without winning a single category.')]);
+      else if (ap === 1) f.push([95, `Highest plain average of the event (${fmt1(o.avg)}), but ${rp ? ordinal(rp) : 'unplaced'} once rank scoring is applied.`]);
+      if (golds.length) f.push([90, `Took 🥇 in ${listAnd(golds)}.`]);
+      else if (rp && rp <= 3 && !f.length) f.push([85, 'Didn’t win any single category; it placed on all-round consistency.']);
+      if (cats.every((c) => catRanks[c].rank[n] && catRanks[c].rank[n] <= 5)) f.push([75, 'Top 5 in every category.']);
+      if (topSingle.n === n) f.push([80, `Earned the single highest judge average of the whole event (${fmt1(topSingle.v)}).`]);
+      if (widest.n === n) f.push([72, `The most divisive entry: judges' averages ran from ${fmt1(widest.lo)} all the way to ${fmt1(widest.hi)}.`]);
+      if (tightest.n === n) f.push([72, `Judges agreed on this one more than any other entry, all within ${fmt1(tightest.s)} points.`]);
+      if (rp && ap && Math.abs(rp - ap) >= 8) f.push([60, rp < ap ? `Rank scoring lifts it ${ap - rp} places above where plain averages would put it.` : `Plain averages would have it ${rp - ap} places higher than rank scoring does.`]);
+      const best = cats.map((c) => ({ c, r: catRanks[c].rank[n] })).filter((x) => x.r).sort((a, b) => a.r - b.r)[0];
+      if (best && rp && best.r <= 5 && rp - best.r >= 8 && !golds.length) f.push([58, `Its standout is ${best.c}: ${ordinal(best.r)} in the event, well ahead of its ${ordinal(rp)} overall.`]);
+      const txt = {}; entryNotes.forEach((x) => { txt[x.event_judge_id] = (txt[x.event_judge_id] || '') + ' ' + String(x.note).toLowerCase(); });
+      const count = (re) => Object.values(txt).filter((t) => re.test(t)).length;
+      const theme = FACT_THEMES.map(([name, re]) => ({ name, k: count(re) })).filter((h) => h.k >= 3).sort((a, b) => b.k - a.k)[0];
+      if (theme) f.push([56 + theme.k, `${numWordCap(theme.k)} judges separately mentioned ${theme.name}.`]);
+      const hits = FACT_FLAVORS.map(([name, re]) => ({ name, k: count(re) })).filter((h) => h.k >= 2).sort((a, b) => b.k - a.k);
+      if (hits.length) {
+        const h = hits.slice(0, 2);
+        f.push([55 + h[0].k, h.length === 2 && h[1].k === h[0].k
+          ? `${numWordCap(h[0].k)} judges independently picked up ${h[0].name}, and ${h[1].name} came up just as often.`
+          : `${numWordCap(h[0].k)} different judges independently picked up ${h[0].name} notes.`]);
+      }
+      if (best && !golds.length && best.r <= 15) f.push([40, `Its strongest category was ${best.c}, ${ordinal(best.r)} of ${entryNums.length}.`]);
+      const fan = javs(n).length ? Math.max(...javs(n)) : null;
+      if (fan != null) f.push([35, `Its biggest fan on the panel gave it an average of ${fmt1(fan)}.`]);
+      return f.sort((a, b) => b[0] - a[0]).slice(0, 2).map((x) => x[1]).join(' ');
+    };
+
     summaries.push({
       track: t, rankedJudges, total: entryNums.length,
       standings: [...ranked, ...entryNums.filter((n) => !ranked.includes(n))].map((n) => ({
@@ -799,6 +861,7 @@ function Feedback({ code }) {
             notes: entryNotes.filter((x) => x.category === c) };
         }),
         general: entryNotes.filter((x) => x.category == null),
+        facts: factsFor(n, entryNotes),
       });
     });
   });
@@ -818,6 +881,7 @@ function Feedback({ code }) {
         c.notes.forEach((x) => out.push([...base, c.c, c.avg == null ? '' : c.avg.toFixed(2), rk, who(x.event_judge_id, x.judge), x.note]));
       });
       s.general.forEach((x) => out.push([...base, 'General', '', '', who(x.event_judge_id, x.judge), x.note]));
+      if (s.facts) out.push([...base, 'Fun facts', '', '', '', s.facts]);
     });
     downloadCsv(`${code}-entry-feedback.csv`, out);
   }
@@ -920,6 +984,7 @@ function Feedback({ code }) {
                 {s.overall && <span>Overall avg <b className="fb-num">{s.overall.avg.toFixed(1)}</b></span>}
               </div>
             </div>
+            {s.facts && <div className="fb-facts">✨ {s.facts}</div>}
             <div className="admin-table-wrap">
               <table className="admin-table fb-table">
                 <thead><tr><th>Category</th><th>Avg</th><th>Rank</th><th>Judges' notes</th></tr></thead>
