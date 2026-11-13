@@ -49,6 +49,28 @@ function entryStats(entryId, categories, scores) {
   return { total, scoredCount, avg: categories.length ? total / categories.length : 0 };
 }
 
+// Display-only tie cue: fully scored entries with the same total. `pos` is the
+// shared ranking position (1 + entries with a strictly higher total).
+function tieInfo(entries, categories, scores) {
+  const full = [];
+  const all = entries.map((en) => {
+    const st = entryStats(en.id, categories, scores);
+    if (categories.length && st.scoredCount === categories.length) full.push({ en, key: st.total.toFixed(2), total: st.total });
+    return st.total;
+  });
+  const byKey = {};
+  full.forEach((x) => { (byKey[x.key] = byKey[x.key] || []).push(x); });
+  const tied = {};
+  const groups = [];
+  Object.values(byKey).filter((g) => g.length > 1).forEach((g) => {
+    const pos = 1 + all.filter((t) => t > g[0].total + 1e-9).length;
+    g.forEach((x) => { tied[x.en.id] = pos; });
+    groups.push({ pos, nums: g.map((x) => x.en.entry_number).sort((a, b) => a - b) });
+  });
+  groups.sort((a, b) => a.pos - b.pos);
+  return { tied, groups };
+}
+
 // (entry, category) pairs with no confirmed score — these block submit.
 // `unsaved` marks a value the judge did enter that hasn't reached the DB yet,
 // so they aren't told to score something they can see they already scored.
@@ -559,6 +581,7 @@ export default function App() {
   if (!ready) return (<div className="wrap"><div className="center muted-note">Loading…</div></div>);
 
   const missing = showMissing ? unscoredPairs(entries, categories, scores) : [];
+  const ties = tieInfo(entries, categories, scores);
 
   // Before eventRow loads (signin screen reached straight off submitCode, no
   // DB round trip yet — see bootstrap()), fall back to what the judge typed.
@@ -641,16 +664,23 @@ export default function App() {
           <button className={'sort-opt' + (sortOrder === 'rank' ? ' active' : '')} onClick={() => setSortOrder('rank')}>Ranking</button>
         </div>
 
+        {ties.groups.length > 0 && (
+          <div className="tie-note">
+            Tied totals: {ties.groups.map((g) => g.nums.map((n) => '#' + n).join(' & ')).join(', ')}. Nudge one score to break each tie.
+          </div>
+        )}
         <ul className="entry-list">
           {sortedEntries(entries, categories, scores, sortOrder).map((en, idx) => {
             const { avg, scoredCount } = entryStats(en.id, categories, scores);
             const avgMax = categories.length ? categories.reduce((s, c) => s + (c.max_points || 0), 0) / categories.length : 0;
             return (
               <li className="entry-row" key={en.id} onClick={() => setOpenEntry(en.id)}>
-                {sortOrder === 'rank' && <span className="entry-row-pos">{rankLabel(idx + 1)}</span>}
+                {sortOrder === 'rank' && (ties.tied[en.id]
+                  ? <span className="entry-row-pos tied">={rankLabel(ties.tied[en.id])}</span>
+                  : <span className="entry-row-pos">{rankLabel(idx + 1)}</span>)}
                 <span className="entry-row-num">Entry #{en.entry_number}</span>
                 <span className="entry-row-progress">{scoredCount}/{categories.length}</span>
-                <span className="entry-row-avg">{scoredCount ? avg.toFixed(1) + '/' + avgMax : '—'}</span>
+                <span className={'entry-row-avg' + (ties.tied[en.id] ? ' tied' : '')}>{scoredCount ? avg.toFixed(1) + '/' + avgMax : '—'}</span>
               </li>
             );
           })}

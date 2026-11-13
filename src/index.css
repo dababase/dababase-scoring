@@ -124,3 +124,6 @@ textarea:focus{outline:none;border-color:var(--amber-dim)}
 .admin-h2{font-family:'Playfair Display',serif;font-weight:500;color:var(--text);font-size:20px;margin:20px 0 8px}
 textarea.admin-paste{min-height:120px;font-family:'Space Mono',monospace;font-size:13px}
 @media (max-width:560px){.admin-stats{grid-template-columns:repeat(2,1fr)}}
+.entry-row-avg.tied{color:#ff6b6b;background:#3a1010}
+.entry-row-pos.tied{color:#ff6b6b}
+.tie-note{color:#ff6b6b;background:#ff6b6b14;border:1px solid #ff6b6b55;border-radius:10px;padding:8px 12px;font-size:13px;margin:0 0 10px}
