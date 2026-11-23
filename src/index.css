@@ -28,6 +28,9 @@ input[type=text]:focus,input[type=email]:focus{outline:none;border-color:var(--a
 .btn:disabled{opacity:.5;cursor:default}
 .err{color:#ff7a6b;font-size:13px;margin-top:12px}
 .ok{color:var(--amber-dim);font-size:13px;margin-top:12px}
+.stale-banner{border:1px solid var(--amber);background:var(--amber-bg);border-radius:12px;padding:14px 16px;margin:0 0 16px}
+.stale-banner-text{color:var(--text);font-size:14px;line-height:1.45}
+.stale-banner .btn{margin-top:10px}
 .divider{display:flex;align-items:center;gap:12px;color:var(--faint);font-size:12px;margin:20px 0;font-family:'Space Mono',monospace}
 .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--inactive)}
 .cat{margin-top:18px}
