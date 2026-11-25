@@ -167,15 +167,22 @@ function saveStatusLabel(status, lastSavedAt) {
 export default function App() {
   const [session, setSession] = useState(null);
   const [ready, setReady] = useState(false);
-  // Per-track deployments are pinned to one event via config.js — the judge
-  // never needs to type a code, so skip straight past that screen. The
-  // shared dev sandbox leaves EVENT_CODE blank and still starts on 'code'.
-  const [step, setStep] = useState(() => (EVENT_CODE ? 'signin' : 'code'));
+  // Judges never type an event code. The event comes from the link
+  // (?event=CODE, for testing other events on one deployment) or from
+  // config.js, and is stored so it survives the sign-in redirect.
+  const [eventCode] = useState(() => {
+    let fromUrl = '';
+    try { fromUrl = (new URLSearchParams(window.location.search).get('event') || '').trim(); } catch (_) {}
+    const code = fromUrl || EVENT_CODE;
+    if (code) localStorage.setItem(CURRENT_CODE_KEY, code);
+    return code || localStorage.getItem(CURRENT_CODE_KEY) || '';
+  });
+  // 'noevent' only shows when this deployment has no event set up at all.
+  const [step, setStep] = useState(() => (eventCode ? 'signin' : 'noevent'));
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const [codeInput, setCodeInput] = useState(EVENT_CODE);
   const [email, setEmail] = useState('');
   const [nameInput, setNameInput] = useState('');
 
@@ -273,10 +280,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (EVENT_CODE) localStorage.setItem(CURRENT_CODE_KEY, EVENT_CODE);
-  }, []);
-
-  useEffect(() => {
     let mounted = true;
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
@@ -335,20 +338,20 @@ export default function App() {
   async function bootstrap(s) {
     signedOutRef.current = false;
     setError('');
-    // Resolving the events table requires an authenticated role (RLS), so a
-    // code typed before sign-in can't be validated yet — submitCode() just
-    // stores it and this is where it actually gets looked up, for both the
-    // immediate post-guest-signin path and the OAuth-redirect round trip
-    // (where component state, including eventRow, was lost on reload).
+    // Resolving the events table requires an authenticated role (RLS), so
+    // the event code (from the link or config.js) can't be validated until
+    // there's a session — this is where it actually gets looked up,
+    // including after the OAuth-redirect round trip (where component state,
+    // including eventRow, was lost on reload).
     let ev = eventRow;
     if (!ev) {
       const code = localStorage.getItem(CURRENT_CODE_KEY);
-      if (!code) { setStep('code'); setReady(true); return; }
+      if (!code) { setStep('noevent'); setReady(true); return; }
       const { data: found } = await supabase.from('events').select('*').ilike('event_code', code).maybeSingle();
       if (!found) {
         localStorage.removeItem(CURRENT_CODE_KEY);
-        setError('Code not recognized. Check with the organizer.');
-        setStep('code'); setReady(true); return;
+        setError('This event could not be found. Check the link with the organizer.');
+        setStep('noevent'); setReady(true); return;
       }
       ev = found;
       setEventRow(ev);
@@ -579,7 +582,7 @@ export default function App() {
   async function signInGoogle() {
     setError('');
     const { error: e } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
-    if (e) setError('Google sign-in failed. Try email or guest.');
+    if (e) setError('Google sign-in failed. Try the email link instead.');
   }
   async function sendMagic() {
     setError(''); setInfo('');
@@ -590,24 +593,6 @@ export default function App() {
     setBusy(false);
     if (e) setError('Could not send the link. Check the address.'); else setInfo('Check your email for a sign-in link.');
   }
-  async function signInGuest() {
-    setError('');
-    const { error: e } = await supabase.auth.signInAnonymously();
-    if (e) setError('Guest sign-in is not enabled. Use email or Google.');
-  }
-
-  function submitCode() {
-    setError('');
-    const code = codeInput.trim().toUpperCase();
-    if (!code) return;
-    // Can't validate against the events table yet — RLS requires an
-    // authenticated role, and this judge may not have signed in at all yet.
-    // bootstrap() does the real lookup once there's a session, and bounces
-    // back here with an error if the code turns out not to match anything.
-    localStorage.setItem(CURRENT_CODE_KEY, code);
-    if (session) bootstrap(session); else setStep('signin');
-  }
-
   async function submitName() {
     setError('');
     const nm = nameInput.trim();
@@ -670,9 +655,9 @@ export default function App() {
   const missing = showMissing ? unscoredPairs(entries, categories, scores) : [];
   const ties = tieInfo(entries, categories, scores);
 
-  // Before eventRow loads (signin screen reached straight off submitCode, no
-  // DB round trip yet — see bootstrap()), fall back to what the judge typed.
-  const eventLabel = (eventRow && (eventRow.name || eventRow.event_code)) || codeInput || 'Judge Scoring';
+  // Before eventRow loads (no DB round trip until sign-in — see bootstrap()),
+  // fall back to the event code itself.
+  const eventLabel = (eventRow && (eventRow.name || eventRow.event_code)) || eventCode || 'Judge Scoring';
   const theme = (eventRow && eventRow.theme) || null;
   const overlayOpacity = theme && typeof theme.overlay_opacity === 'number'
     ? Math.min(1, Math.max(0, theme.overlay_opacity))
@@ -693,13 +678,10 @@ export default function App() {
         <div className="logo-header"><img src={theme.logo_url} alt="" className="logo-header-img" /></div>
       )}
 
-      {step === 'code' && (<>
+      {step === 'noevent' && (<>
         <div className="eyebrow">Blind Judging</div>
-        <h1>Enter event code</h1>
-        <p className="sub">Your organizer gave you a code to unlock scoring.</p>
-        <label>Event code</label>
-        <input type="text" value={codeInput} onChange={(e) => setCodeInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitCode()} placeholder="Event code" autoCapitalize="characters" />
-        <button className="btn primary" onClick={submitCode}>Continue</button>
+        <h1>No event here yet</h1>
+        <p className="sub">This scoring link isn't set up for an event. Use the link your organizer sent you.</p>
         {error && <div className="err">{error}</div>}
         <SponsorFooter />
       </>)}
@@ -714,8 +696,6 @@ export default function App() {
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" />
         <button className="btn outline" onClick={sendMagic} disabled={busy}>{busy ? 'Sending…' : 'Email me a link'}</button>
         <p className="muted-note" style={{ marginTop: '8px' }}>Heads up: if you switch to a different browser app, you'll be signed out. Don't worry — nothing is lost. Just go back to your email and tap the link again.</p>
-        <div className="divider">or</div>
-        <button className="btn ghost" onClick={signInGuest}>Continue as guest</button>
         {info && <div className="ok">{info}</div>}
         {error && <div className="err">{error}</div>}
         <SponsorFooter />
